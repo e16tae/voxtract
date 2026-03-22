@@ -1,0 +1,131 @@
+# tests/test_stt/test_qwen3.py
+"""Tests for Qwen3 ASR STT provider."""
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
+
+import pytest
+
+from voxtract.models import Transcript
+
+
+@dataclass
+class FakeAlignItem:
+    text: str
+    start_time: int  # milliseconds
+    end_time: int
+
+@dataclass
+class FakeAlignResult:
+    items: list
+
+@dataclass
+class FakeASRTranscription:
+    language: str
+    text: str
+    time_stamps: FakeAlignResult | None = None
+
+
+class TestQwen3Registration:
+    def test_registered(self) -> None:
+        from voxtract.stt import _PROVIDERS, _ensure_builtins
+        _ensure_builtins()
+        assert "qwen3" in _PROVIDERS
+
+
+class TestQwen3Provider:
+    def test_implements_protocol(self) -> None:
+        from voxtract.stt.base import STTProvider
+        from voxtract.stt.qwen3 import Qwen3Provider
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        assert isinstance(provider, STTProvider)
+
+    def test_file_not_found_raises(self, tmp_path: Path) -> None:
+        from voxtract.errors import STTError
+        from voxtract.stt.qwen3 import Qwen3Provider
+        provider = Qwen3Provider()
+        with pytest.raises(STTError, match="not found"):
+            provider.transcribe(tmp_path / "nonexistent.mp3")
+
+
+class TestBuildTranscript:
+    """Test _build_transcript with mock qwen-asr output."""
+
+    def test_builds_from_timestamps(self) -> None:
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="안녕하세요. 회의를 시작하겠습니다.",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="안녕하세요.", start_time=0.0, end_time=1.2),
+                FakeAlignItem(text="회의를", start_time=1.3, end_time=1.8),
+                FakeAlignItem(text="시작하겠습니다.", start_time=1.8, end_time=3.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+
+        assert transcript.language == "Korean"
+        assert len(transcript.utterances) >= 1
+        for utt in transcript.utterances:
+            assert utt.start_time >= 0
+            assert utt.end_time > utt.start_time
+            assert utt.speaker == "Speaker 0"
+
+    def test_groups_words_into_utterances(self) -> None:
+        """Words with small gaps should be grouped; large gaps create new utterances."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="첫 문장. 두 번째 문장.",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="첫", start_time=0.0, end_time=0.5),
+                FakeAlignItem(text="문장.", start_time=0.5, end_time=1.5),
+                # 2-second pause → should split into new utterance
+                FakeAlignItem(text="두", start_time=3.5, end_time=4.0),
+                FakeAlignItem(text="번째", start_time=4.0, end_time=4.5),
+                FakeAlignItem(text="문장.", start_time=4.5, end_time=5.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 2
+        assert "첫 문장." in transcript.utterances[0].text
+        assert "두 번째 문장." in transcript.utterances[1].text
+
+    def test_no_timestamps_uses_full_text(self) -> None:
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="타임스탬프 없는 전체 텍스트.",
+            time_stamps=None,
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 1
+        assert transcript.utterances[0].text == "타임스탬프 없는 전체 텍스트."
+
+    def test_empty_text_returns_empty(self) -> None:
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(language="Korean", text="", time_stamps=None)
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 0

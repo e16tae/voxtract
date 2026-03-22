@@ -1,0 +1,53 @@
+{
+  "title": "제품 로드맵 회의",
+  "date": "2026-03-17",
+  "doc_type": "minutes",
+  "agenda_discussions": [
+    {
+      "topic": "Q2 출시 일정 검토",
+      "summary": "Q2 주요 기능 출시 일정을 검토하고, 개발팀의 현재 진행 상황을 공유했습니다. 전체적으로 일정 준수가 가능할 것으로 판단되며, 일부 기능은 우선순위 조정이 필요합니다.",
+      "speaker_contributions": [
+        {
+          "speaker": "Speaker 1",
+          "contribution": "현재 백엔드 API 개발은 80% 완료되었으며, 4월 초까지 마무리 가능합니다."
+        },
+        {
+          "speaker": "Speaker 2",
+          "contribution": "프론트엔드 UI 작업은 디자인 확정 후 2주 내 구현 가능합니다."
+        }
+      ]
+    },
+    {
+      "topic": "사용자 피드백 반영 계획",
+      "summary": "베타 테스트 사용자들의 주요 피드백을 분석하고, 우선 반영할 항목을 선정했습니다. UX 개선과 성능 최적화가 가장 높은 우선순위로 결정되었습니다.",
+      "speaker_contributions": [
+        {
+          "speaker": "Speaker 1",
+          "contribution": "성능 최적화를 위해 캐싱 전략을 도입하겠습니다."
+        },
+        {
+          "speaker": "Speaker 2",
+          "contribution": "UX 리서치 결과를 바탕으로 네비게이션 구조를 개선하겠습니다."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    "Q2 출시일을 6월 15일로 확정한다.",
+    "UX 개선 작업을 최우선으로 진행한다."
+  ],
+  "action_items": [
+    {
+      "assignee": "Speaker 1",
+      "description": "백엔드 API 성능 테스트 및 캐싱 전략 문서 작성",
+      "deadline": "2026-04-01"
+    },
+    {
+      "assignee": "Speaker 2",
+      "description": "네비게이션 개선안 프로토타입 제작",
+      "deadline": "2026-03-31"
+    }
+  ],
+  "full_transcript": null,
+  "executive_summary": null
+}
