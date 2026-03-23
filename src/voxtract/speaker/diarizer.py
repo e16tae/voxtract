@@ -1,7 +1,7 @@
 """Speaker diarization using pyannote.audio pipeline.
 
-Assigns speaker labels to Qwen3-ASR utterances by running pyannote
-diarization on the audio and matching speaker segments to word timestamps.
+Assigns speaker labels to STT utterances by running pyannote
+diarization on the audio and matching speaker segments by time overlap.
 """
 from __future__ import annotations
 

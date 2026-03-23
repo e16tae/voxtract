@@ -50,30 +50,3 @@ def resolve_device(settings: Settings | None = None) -> str:
         except ImportError:
             return "cpu"
     return device
-
-
-# Empirical constants from RTX 4070 SUPER (11.6GB) testing
-_MODEL_MEMORY_GB = 9.5   # ASR 1.7B + Aligner 0.6B in bfloat16
-_OVERHEAD_GB = 0.5        # CUDA context + fragmentation buffer
-_PEAK_PER_BATCH_GB = 0.68  # lm_head peak allocation per batch item
-
-
-def resolve_batch_size(device: str) -> int:
-    """Calculate optimal max_inference_batch_size from available VRAM.
-
-    Based on empirical measurement: lm_head peak is ~0.68GB per batch item,
-    model weights take ~9.5GB in bfloat16, plus ~0.5GB overhead.
-    """
-    if not device.startswith("cuda"):
-        return 4
-
-    try:
-        import torch
-        dev_idx = int(device.split(":")[-1]) if ":" in device else 0
-        total_gb = torch.cuda.get_device_properties(dev_idx).total_memory / (1024 ** 3)
-    except Exception:
-        return 2
-
-    available_gb = total_gb - _MODEL_MEMORY_GB - _OVERHEAD_GB
-    batch_size = max(1, int(available_gb / _PEAK_PER_BATCH_GB))
-    return min(batch_size, 16)

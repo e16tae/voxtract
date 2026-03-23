@@ -87,7 +87,8 @@ def run_pipeline(
 
     # Step 1: Transcribe (with auto-split for long audio)
     duration = get_duration(audio_path)
-    if duration > _CHUNK_THRESHOLD_MINUTES * 60:
+    handles_long = getattr(stt, "handles_long_audio", False)
+    if duration > _CHUNK_THRESHOLD_MINUTES * 60 and not handles_long:
         transcript = _transcribe_chunked(
             audio_path, stt, language, chunk_min, settings.overlap_seconds,
         )

@@ -14,8 +14,8 @@ from voxtract.models import Transcript
 @dataclass
 class FakeAlignItem:
     text: str
-    start_time: int  # milliseconds
-    end_time: int
+    start_time: float  # seconds
+    end_time: float
 
 @dataclass
 class FakeAlignResult:
@@ -41,6 +41,11 @@ class TestQwen3Provider:
         from voxtract.stt.qwen3 import Qwen3Provider
         provider = Qwen3Provider.__new__(Qwen3Provider)
         assert isinstance(provider, STTProvider)
+
+    def test_handles_long_audio(self) -> None:
+        from voxtract.stt.qwen3 import Qwen3Provider
+        provider = Qwen3Provider()
+        assert provider.handles_long_audio is True
 
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
@@ -129,3 +134,28 @@ class TestBuildTranscript:
 
         transcript = provider._build_transcript(result, Path("test.mp3"))
         assert len(transcript.utterances) == 0
+
+
+class TestPipelineChunkingSkip:
+    """Verify pipeline skips external chunking for handles_long_audio providers."""
+
+    @patch("voxtract.audio.splitter.get_duration", return_value=3600)
+    @patch("voxtract.pipeline._transcribe_chunked")
+    def test_skips_chunking_for_qwen3(self, mock_chunked, mock_duration, tmp_path):
+        from voxtract.pipeline import run_pipeline
+
+        fake_transcript = Transcript(
+            language="ko", speakers=["Speaker 0"], utterances=[], metadata={},
+        )
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = fake_transcript
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript):
+            audio = tmp_path / "long.wav"
+            audio.touch()
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+        mock_chunked.assert_not_called()
+        mock_provider.transcribe.assert_called_once()
