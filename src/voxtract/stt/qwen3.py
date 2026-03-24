@@ -22,8 +22,11 @@ _DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 _DEFAULT_ALIGNER = "Qwen/Qwen3-ForcedAligner-0.6B"
 _PAUSE_THRESHOLD_S = 1.5  # gap > 1.5s between words → new utterance
 
-# Empirical constants from RTX 4070 SUPER (11.6GB) testing
-_MODEL_MEMORY_GB = 9.5   # ASR 1.7B + Aligner 0.6B in bfloat16
+# Empirical constants from RTX 4070 SUPER (12GB) testing.
+# Actual model weights: ASR ~4.46GB + Aligner ~1.84GB = ~6.3GB (bf16).
+# _MODEL_MEMORY_GB represents peak inference VRAM baseline (weights + activations),
+# not weights alone.
+_MODEL_MEMORY_GB = 9.5   # peak VRAM baseline during inference (bf16)
 _OVERHEAD_GB = 0.5        # CUDA context + fragmentation buffer
 _PEAK_PER_BATCH_GB = 0.68  # lm_head peak allocation per batch item
 
