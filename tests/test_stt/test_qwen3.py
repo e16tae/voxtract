@@ -47,6 +47,20 @@ class TestQwen3Provider:
         provider = Qwen3Provider()
         assert provider.handles_long_audio is True
 
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_use_cache_false(self, mock_device, mock_model_cls) -> None:
+        """Model should be loaded with use_cache=False."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model_cls.from_pretrained.return_value = MagicMock()
+
+        provider = Qwen3Provider()
+        provider._load_model()
+
+        call_kwargs = mock_model_cls.from_pretrained.call_args[1]
+        assert call_kwargs.get("use_cache") is False
+
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
         from voxtract.stt.qwen3 import Qwen3Provider

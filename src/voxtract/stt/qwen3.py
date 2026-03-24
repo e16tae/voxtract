@@ -102,6 +102,7 @@ class Qwen3Provider:
                 dtype=dtype,
                 device_map=device,
                 attn_implementation=attn_impl,
+                use_cache=False,
                 max_new_tokens=512,
                 max_inference_batch_size=batch_size,
                 forced_aligner=self._aligner_repo,
