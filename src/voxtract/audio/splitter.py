@@ -51,6 +51,62 @@ def get_duration(audio_path: Path) -> float:
         ) from exc
 
 
+def _is_wav16k_mono(audio_path: Path) -> bool:
+    """Check if audio is already 16kHz mono WAV via ffprobe."""
+    if audio_path.suffix.lower() not in (".wav", ".wave"):
+        return False
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=sample_rate,channels,codec_name",
+             "-of", "csv=p=0", str(audio_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        parts = result.stdout.strip().split(",")
+        return len(parts) >= 3 and parts[0] == "pcm_s16le" and parts[1] == "16000" and parts[2] == "1"
+    except Exception:
+        return False
+
+
+def convert_to_wav16k(audio_path: Path, *, output_dir: Path) -> Path:
+    """Convert audio to 16kHz mono PCM WAV. Returns original path if already matching."""
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise AudioError(
+            f"Audio file not found: {audio_path}",
+            code="AUDIO_FILE_NOT_FOUND",
+            recoverable=False,
+        )
+
+    if _is_wav16k_mono(audio_path):
+        return audio_path
+
+    if not check_ffmpeg():
+        raise AudioError(
+            "ffmpeg not found on PATH. Install it with: apt install ffmpeg",
+            code="AUDIO_FFMPEG_MISSING",
+            recoverable=False,
+        )
+
+    wav_path = output_dir / f"{audio_path.stem}.wav"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(audio_path),
+             "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+             "-loglevel", "error", str(wav_path)],
+            capture_output=True, text=True, timeout=300, check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise AudioError(
+            f"WAV conversion failed: {exc.stderr}",
+            code="AUDIO_CONVERT",
+            recoverable=False,
+        ) from exc
+
+    logger.info("Converted %s → %s (16kHz mono WAV)", audio_path.name, wav_path.name)
+    return wav_path
+
+
 def split_audio(
     audio_path: Path,
     *,
