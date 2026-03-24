@@ -50,16 +50,17 @@ class TestQwen3Provider:
     @patch("qwen_asr.Qwen3ASRModel")
     @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
     def test_use_cache_false(self, mock_device, mock_model_cls) -> None:
-        """Model should be loaded with use_cache=False."""
+        """Model should be loaded with use_cache=False set on model.config."""
         from voxtract.stt.qwen3 import Qwen3Provider
 
-        mock_model_cls.from_pretrained.return_value = MagicMock()
+        mock_model = MagicMock()
+        mock_model.model.config.use_cache = True
+        mock_model_cls.from_pretrained.return_value = mock_model
 
         provider = Qwen3Provider()
         provider._load_model()
 
-        call_kwargs = mock_model_cls.from_pretrained.call_args[1]
-        assert call_kwargs.get("use_cache") is False
+        assert mock_model.model.config.use_cache is False
 
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError

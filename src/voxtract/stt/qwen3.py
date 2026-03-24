@@ -105,7 +105,6 @@ class Qwen3Provider:
                 dtype=dtype,
                 device_map=device,
                 attn_implementation=attn_impl,
-                use_cache=False,
                 max_new_tokens=512,
                 max_inference_batch_size=batch_size,
                 forced_aligner=self._aligner_repo,
@@ -115,6 +114,9 @@ class Qwen3Provider:
                     attn_implementation=attn_impl,
                 ),
             )
+            # Disable KV cache — saves VRAM, no effect on output quality
+            if hasattr(self._model, 'model') and hasattr(self._model.model, 'config'):
+                self._model.model.config.use_cache = False
         except Exception as exc:
             raise STTError(
                 f"Failed to load Qwen3 ASR model '{self._model_repo}': {exc}",
