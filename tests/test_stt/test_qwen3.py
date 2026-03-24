@@ -151,7 +151,11 @@ class TestPipelineChunkingSkip:
         mock_provider.handles_long_audio = True
         mock_provider.transcribe.return_value = fake_transcript
 
+        wav_path = tmp_path / "long.wav"
+        wav_path.touch()
+
         with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
              patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript):
             audio = tmp_path / "long.wav"
             audio.touch()
