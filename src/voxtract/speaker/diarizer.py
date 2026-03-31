@@ -54,6 +54,76 @@ def _load_pipeline(device: str, *, settings: Settings | None = None):
     return pipeline
 
 
+_MIN_SPLIT_DURATION_S = 2.0  # Don't split utterances shorter than this
+
+
+def _split_by_speaker_change(
+    utterances: list[Utterance],
+    segments: list[tuple[float, float, str]],
+) -> list[Utterance]:
+    """Split utterances that span speaker change boundaries.
+
+    When an utterance's time range crosses from one speaker segment to another,
+    split it at the boundary. Text is proportionally divided based on time.
+    Short utterances (<_MIN_SPLIT_DURATION_S) are not split.
+    """
+    if not utterances or not segments:
+        return utterances
+
+    result: list[Utterance] = []
+
+    for utt in utterances:
+        duration = utt.end_time - utt.start_time
+        if duration < _MIN_SPLIT_DURATION_S:
+            result.append(utt)
+            continue
+
+        # Find all speaker segments that overlap this utterance
+        overlapping = []
+        for seg_start, seg_end, speaker in segments:
+            overlap_start = max(utt.start_time, seg_start)
+            overlap_end = min(utt.end_time, seg_end)
+            if overlap_end > overlap_start:
+                overlapping.append((overlap_start, overlap_end, speaker))
+
+        if len(overlapping) <= 1:
+            result.append(utt)
+            continue
+
+        # Split text proportionally by time
+        words = utt.text.split()
+        total_duration = utt.end_time - utt.start_time
+
+        for seg_start, seg_end, speaker in overlapping:
+            seg_duration = seg_end - seg_start
+            ratio = seg_duration / total_duration
+            word_count = max(1, round(len(words) * ratio))
+
+            seg_words = words[:word_count]
+            words = words[word_count:]
+
+            text = " ".join(seg_words).strip()
+            if text:
+                result.append(Utterance(
+                    speaker=speaker,
+                    start_time=seg_start,
+                    end_time=seg_end,
+                    text=text,
+                ))
+
+        # Remaining words go to last segment
+        if words:
+            last = result[-1]
+            result[-1] = Utterance(
+                speaker=last.speaker,
+                start_time=last.start_time,
+                end_time=last.end_time,
+                text=last.text + " " + " ".join(words),
+            )
+
+    return result
+
+
 def _assign_speakers(
     utterances: list[Utterance],
     diarization,
@@ -176,7 +246,13 @@ def diarize_transcript(
     else:
         diarization = result
 
+    # Extract segments for speaker-change splitting
+    segments = []
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        segments.append((turn.start, turn.end, speaker))
+
     new_utterances = _assign_speakers(transcript.utterances, diarization)
+    new_utterances = _split_by_speaker_change(new_utterances, segments)
     new_utterances = _normalize_speaker_labels(new_utterances)
     new_speakers = sorted({u.speaker for u in new_utterances})
 
