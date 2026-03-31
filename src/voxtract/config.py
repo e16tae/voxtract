@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     stt_aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     stt_context: str = ""  # contextual hints for ASR (e.g. topic, names, jargon)
 
+    # Speaker diarization
+    speaker_model: str = "pyannote/speaker-diarization-community-1"
+
     # Chunking
     chunk_minutes: int = 25
     overlap_seconds: int = 60

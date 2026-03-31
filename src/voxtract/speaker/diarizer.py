@@ -16,10 +16,8 @@ from voxtract.models import Transcript, Utterance
 
 logger = logging.getLogger(__name__)
 
-_HF_MODEL = "pyannote/speaker-diarization-3.1"
 
-
-def _load_pipeline(device: str):
+def _load_pipeline(device: str, *, settings: Settings | None = None):
     """Load pyannote diarization pipeline onto the given device."""
     try:
         import torch
@@ -32,13 +30,19 @@ def _load_pipeline(device: str):
             recoverable=False,
         )
 
+    if settings is None:
+        from voxtract.config import get_settings
+        settings = get_settings()
+
+    model_name = settings.speaker_model
+
     try:
-        pipeline = Pipeline.from_pretrained(_HF_MODEL)
+        pipeline = Pipeline.from_pretrained(model_name)
     except Exception as exc:
         raise SpeakerError(
-            f"Failed to load pyannote pipeline '{_HF_MODEL}': {exc}. "
+            f"Failed to load pyannote pipeline '{model_name}': {exc}. "
             "You may need to accept the model terms at "
-            f"https://huggingface.co/{_HF_MODEL} and set HF_TOKEN.",
+            f"https://huggingface.co/{model_name} and set HF_TOKEN.",
             code="SPEAKER_MODEL_LOAD",
             recoverable=False,
         ) from exc
@@ -127,7 +131,7 @@ def diarize_transcript(
     device = resolve_device(settings)
     logger.info("Running pyannote diarization on device=%s", device)
 
-    pipeline = _load_pipeline(device)
+    pipeline = _load_pipeline(device, settings=settings)
 
     # pyannote requires WAV; convert if needed
     audio_path = Path(audio_path)

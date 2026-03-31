@@ -9,6 +9,7 @@ import pytest
 from voxtract.models import Transcript, Utterance
 from voxtract.speaker.diarizer import (
     _assign_speakers,
+    _load_pipeline,
     _normalize_speaker_labels,
     diarize_transcript,
 )
@@ -111,3 +112,24 @@ class TestDiarizeTranscript:
         assert len(result.speakers) == 2
         assert result.utterances[0].speaker == "Speaker 1"
         assert result.utterances[2].speaker == "Speaker 2"
+
+
+class TestLoadPipeline:
+    def test_uses_configured_model(self) -> None:
+        """_load_pipeline should use the model name from settings."""
+        from voxtract.config import Settings
+
+        settings = Settings(speaker_model="pyannote/speaker-diarization-community-1")
+
+        mock_pipeline_cls = MagicMock()
+        mock_pipeline_cls.from_pretrained.return_value = MagicMock()
+
+        with patch.dict(
+            "sys.modules",
+            {"pyannote": MagicMock(), "pyannote.audio": MagicMock(Pipeline=mock_pipeline_cls)},
+        ), patch("torch.device"):
+            _load_pipeline("cpu", settings=settings)
+
+        mock_pipeline_cls.from_pretrained.assert_called_once_with(
+            "pyannote/speaker-diarization-community-1"
+        )
