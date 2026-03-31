@@ -69,6 +69,9 @@ def run_pipeline(
     stt_provider: str | None = None,
     context: str | None = None,
     chunk_minutes: int | None = None,
+    num_speakers: int | None = None,
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
 ) -> dict:
     """Run the full transcribe → diarize pipeline.
 
@@ -104,7 +107,11 @@ def run_pipeline(
             try:
                 from voxtract.speaker.diarizer import diarize_transcript
                 transcript = diarize_transcript(
-                    transcript, wav_path, settings=settings,
+                    transcript, wav_path,
+                    num_speakers=num_speakers,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                    settings=settings,
                 )
             except ImportError:
                 logger.warning("Speaker diarization not available (speaker extras not installed)")

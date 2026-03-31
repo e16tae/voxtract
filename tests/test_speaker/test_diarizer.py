@@ -114,6 +114,27 @@ class TestDiarizeTranscript:
         assert result.utterances[2].speaker == "Speaker 2"
 
 
+class TestSpeakerCountArgs:
+    def test_min_max_speakers_passed(self) -> None:
+        transcript = _make_transcript(4)
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = _FakeDiarization([
+            (0.0, 22.0, "SPEAKER_00"),
+            (24.0, 46.0, "SPEAKER_01"),
+        ])
+
+        with patch("voxtract.speaker.diarizer._load_pipeline", return_value=mock_pipeline):
+            diarize_transcript(
+                transcript, Path("/tmp/audio.wav"),
+                min_speakers=2, max_speakers=5,
+            )
+
+        call_kwargs = mock_pipeline.call_args[1]
+        assert call_kwargs["min_speakers"] == 2
+        assert call_kwargs["max_speakers"] == 5
+
+
 class TestLoadPipeline:
     def test_uses_configured_model(self) -> None:
         """_load_pipeline should use the model name from settings."""

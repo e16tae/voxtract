@@ -118,6 +118,8 @@ def diarize_transcript(
     transcript: Transcript,
     audio_path: Path,
     num_speakers: int | None = None,
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
     settings: Settings | None = None,
 ) -> Transcript:
     """Assign speaker labels to utterances using pyannote diarization."""
@@ -150,6 +152,10 @@ def diarize_transcript(
     diarize_kwargs = {}
     if num_speakers is not None:
         diarize_kwargs["num_speakers"] = num_speakers
+    if min_speakers is not None:
+        diarize_kwargs["min_speakers"] = min_speakers
+    if max_speakers is not None:
+        diarize_kwargs["max_speakers"] = max_speakers
 
     try:
         result = pipeline(str(audio_path), **diarize_kwargs)
