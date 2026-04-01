@@ -6,10 +6,10 @@ diarization on the audio and matching speaker segments by time overlap.
 from __future__ import annotations
 
 import logging
-import subprocess
 import tempfile
 from pathlib import Path
 
+from voxtract.audio.splitter import convert_to_wav16k
 from voxtract.config import Settings, resolve_device
 from voxtract.errors import SpeakerError
 from voxtract.models import Transcript, Utterance
@@ -86,17 +86,29 @@ def _split_by_speaker_change(
             if overlap_end > overlap_start:
                 overlapping.append((overlap_start, overlap_end, speaker))
 
+        # Merge consecutive segments with the same speaker to avoid
+        # unnecessary splits (pyannote can emit adjacent same-speaker segments)
+        merged: list[tuple[float, float, str]] = []
+        for seg in overlapping:
+            if merged and merged[-1][2] == seg[2]:
+                prev = merged[-1]
+                merged[-1] = (prev[0], seg[1], seg[2])
+            else:
+                merged.append(seg)
+        overlapping = merged
+
         if len(overlapping) <= 1:
             result.append(utt)
             continue
 
-        # Split text proportionally by time
+        # Split text proportionally by actual overlap duration (not utterance
+        # duration) so that gaps between segments don't skew word distribution
         words = utt.text.split()
-        total_duration = utt.end_time - utt.start_time
+        total_overlap = sum(e - s for s, e, _ in overlapping)
 
         for seg_start, seg_end, speaker in overlapping:
             seg_duration = seg_end - seg_start
-            ratio = seg_duration / total_duration
+            ratio = seg_duration / total_overlap
             word_count = max(1, round(len(words) * ratio))
 
             seg_words = words[:word_count]
@@ -126,13 +138,9 @@ def _split_by_speaker_change(
 
 def _assign_speakers(
     utterances: list[Utterance],
-    diarization,
+    segments: list[tuple[float, float, str]],
 ) -> list[Utterance]:
     """Assign pyannote speaker labels to utterances by time overlap."""
-    segments = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        segments.append((turn.start, turn.end, speaker))
-
     new_utterances = []
     for utt in utterances:
         mid = (utt.start_time + utt.end_time) / 2
@@ -148,11 +156,14 @@ def _assign_speakers(
                 best_overlap = overlap
                 best_speaker = speaker
 
-        if best_overlap == 0.0:
+        if best_overlap == 0.0 and segments:
+            # No overlap found; assign the temporally nearest segment's speaker
+            best_dist = float("inf")
             for seg_start, seg_end, speaker in segments:
-                if seg_start <= mid <= seg_end:
+                dist = min(abs(mid - seg_start), abs(mid - seg_end))
+                if dist < best_dist:
+                    best_dist = dist
                     best_speaker = speaker
-                    break
 
         new_utterances.append(Utterance(
             speaker=best_speaker,
@@ -205,20 +216,6 @@ def diarize_transcript(
 
     pipeline = _load_pipeline(device, settings=settings)
 
-    # pyannote requires WAV; convert if needed
-    audio_path = Path(audio_path)
-    tmp_dir = None
-    if audio_path.suffix.lower() not in (".wav", ".wave"):
-        tmp_dir = tempfile.mkdtemp()
-        wav_path = Path(tmp_dir) / f"{audio_path.stem}.wav"
-        logger.info("Converting %s to WAV for pyannote", audio_path.suffix)
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1",
-             "-loglevel", "error", str(wav_path)],
-            check=True, timeout=120,
-        )
-        audio_path = wav_path
-
     diarize_kwargs = {}
     if num_speakers is not None:
         diarize_kwargs["num_speakers"] = num_speakers
@@ -227,18 +224,18 @@ def diarize_transcript(
     if max_speakers is not None:
         diarize_kwargs["max_speakers"] = max_speakers
 
-    try:
-        result = pipeline(str(audio_path), **diarize_kwargs)
-    except Exception as exc:
-        raise SpeakerError(
-            f"Pyannote diarization failed: {exc}",
-            code="SPEAKER_DIARIZE",
-            recoverable=True,
-        ) from exc
-    finally:
-        if tmp_dir is not None:
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+    # Convert to 16kHz mono WAV if needed (pyannote requires WAV)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        wav_path = convert_to_wav16k(audio_path, output_dir=Path(tmp_dir))
+
+        try:
+            result = pipeline(str(wav_path), **diarize_kwargs)
+        except Exception as exc:
+            raise SpeakerError(
+                f"Pyannote diarization failed: {exc}",
+                code="SPEAKER_DIARIZE",
+                recoverable=True,
+            ) from exc
 
     # pyannote 4.x returns DiarizeOutput; use exclusive (no overlap) for ASR alignment
     if hasattr(result, "exclusive_speaker_diarization"):
@@ -246,12 +243,12 @@ def diarize_transcript(
     else:
         diarization = result
 
-    # Extract segments for speaker-change splitting
+    # Extract segments once; used by both _assign_speakers and _split_by_speaker_change
     segments = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):
         segments.append((turn.start, turn.end, speaker))
 
-    new_utterances = _assign_speakers(transcript.utterances, diarization)
+    new_utterances = _assign_speakers(transcript.utterances, segments)
     new_utterances = _split_by_speaker_change(new_utterances, segments)
     new_utterances = _normalize_speaker_labels(new_utterances)
     new_speakers = sorted({u.speaker for u in new_utterances})

@@ -52,28 +52,43 @@ class TestAssignSpeakers:
             Utterance(speaker="Speaker 0", start_time=0.0, end_time=10.0, text="A"),
             Utterance(speaker="Speaker 0", start_time=12.0, end_time=22.0, text="B"),
         ]
-        diarization = _FakeDiarization([
+        segments = [
             (0.0, 11.0, "SPEAKER_00"),
             (11.5, 23.0, "SPEAKER_01"),
-        ])
+        ]
 
-        result = _assign_speakers(utts, diarization)
+        result = _assign_speakers(utts, segments)
 
         assert result[0].speaker == "SPEAKER_00"
         assert result[1].speaker == "SPEAKER_01"
         assert result[0].text == "A"
 
-    def test_midpoint_fallback(self) -> None:
+    def test_nearest_segment_fallback(self) -> None:
+        """Zero-duration utterance should match the nearest segment."""
         utts = [
             Utterance(speaker="Speaker 0", start_time=5.0, end_time=5.0, text="짧은 발화"),
         ]
-        diarization = _FakeDiarization([
+        segments = [
             (0.0, 3.0, "SPEAKER_00"),
             (4.0, 8.0, "SPEAKER_01"),
-        ])
+        ]
 
-        result = _assign_speakers(utts, diarization)
+        result = _assign_speakers(utts, segments)
         assert result[0].speaker == "SPEAKER_01"
+
+    def test_nearest_segment_in_gap(self) -> None:
+        """Utterance in a gap between segments should match the nearest one."""
+        utts = [
+            Utterance(speaker="Speaker 0", start_time=3.1, end_time=3.9, text="갭 발화"),
+        ]
+        segments = [
+            (0.0, 3.0, "SPEAKER_00"),
+            (5.0, 10.0, "SPEAKER_01"),
+        ]
+
+        result = _assign_speakers(utts, segments)
+        # mid=3.5, dist to (0,3)=0.5, dist to (5,10)=1.5 → SPEAKER_00 is nearer
+        assert result[0].speaker == "SPEAKER_00"
 
 
 class TestNormalizeSpeakerLabels:
@@ -106,7 +121,8 @@ class TestDiarizeTranscript:
             (24.0, 46.0, "SPEAKER_01"),
         ])
 
-        with patch("voxtract.speaker.diarizer._load_pipeline", return_value=mock_pipeline):
+        with patch("voxtract.speaker.diarizer._load_pipeline", return_value=mock_pipeline), \
+             patch("voxtract.speaker.diarizer.convert_to_wav16k", return_value=Path("/tmp/audio.wav")):
             result = diarize_transcript(transcript, Path("/tmp/audio.wav"))
 
         assert len(result.speakers) == 2
@@ -124,7 +140,8 @@ class TestSpeakerCountArgs:
             (24.0, 46.0, "SPEAKER_01"),
         ])
 
-        with patch("voxtract.speaker.diarizer._load_pipeline", return_value=mock_pipeline):
+        with patch("voxtract.speaker.diarizer._load_pipeline", return_value=mock_pipeline), \
+             patch("voxtract.speaker.diarizer.convert_to_wav16k", return_value=Path("/tmp/audio.wav")):
             diarize_transcript(
                 transcript, Path("/tmp/audio.wav"),
                 min_speakers=2, max_speakers=5,

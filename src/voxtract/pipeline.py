@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from voxtract.config import get_settings
+from voxtract.errors import SpeakerError
 from voxtract.models import Transcript, Utterance
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ def run_pipeline(
                 )
             except ImportError:
                 logger.warning("Speaker diarization not available (speaker extras not installed)")
-            except Exception as exc:
+            except SpeakerError as exc:
                 logger.warning("Speaker diarization failed: %s, continuing without", exc)
 
     # Write output (outside temp dir context — WAV no longer needed)
