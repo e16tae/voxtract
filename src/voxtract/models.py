@@ -5,6 +5,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class WordTimestamp(BaseModel):
+    """A single word with its time boundaries from forced alignment."""
+
+    text: str = Field(description="Word text")
+    start_time: float = Field(description="Start time in seconds")
+    end_time: float = Field(description="End time in seconds")
+
+
 class Utterance(BaseModel):
     """A single speaker utterance with timestamps."""
 
@@ -12,6 +20,10 @@ class Utterance(BaseModel):
     start_time: float = Field(description="Start time in seconds")
     end_time: float = Field(description="End time in seconds")
     text: str = Field(description="Transcribed text content")
+    words: list[WordTimestamp] | None = Field(
+        default=None,
+        description="Word-level timestamps from forced alignment (optional)",
+    )
 
 
 class Transcript(BaseModel):

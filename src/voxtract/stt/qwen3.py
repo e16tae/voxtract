@@ -11,9 +11,9 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from voxtract.config import Settings, resolve_batch_size, resolve_device
+from voxtract.config import Settings, resolve_device
 from voxtract.errors import STTError
-from voxtract.models import Transcript, Utterance
+from voxtract.models import Transcript, Utterance, WordTimestamp
 from voxtract.stt import register
 
 logger = logging.getLogger(__name__)
@@ -22,22 +22,49 @@ _DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 _DEFAULT_ALIGNER = "Qwen/Qwen3-ForcedAligner-0.6B"
 _PAUSE_THRESHOLD_S = 1.5  # gap > 1.5s between words → new utterance
 
+# Empirical constants from RTX 4070 SUPER (12GB) testing.
+# Actual model weights: ASR ~4.46GB + Aligner ~1.84GB = ~6.3GB (bf16).
+# _MODEL_MEMORY_GB represents peak inference VRAM baseline (weights + activations),
+# not weights alone.
+_MODEL_MEMORY_GB = 9.5   # peak VRAM baseline during inference (bf16)
+_OVERHEAD_GB = 0.5        # CUDA context + fragmentation buffer
+_PEAK_PER_BATCH_GB = 0.68  # lm_head peak allocation per batch item
+
+
+def _resolve_batch_size(device: str) -> int:
+    """Calculate optimal max_inference_batch_size from available VRAM."""
+    if not device.startswith("cuda"):
+        return 4
+
+    try:
+        import torch
+        dev_idx = int(device.split(":")[-1]) if ":" in device else 0
+        total_gb = torch.cuda.get_device_properties(dev_idx).total_memory / (1024 ** 3)
+    except Exception:
+        return 2
+
+    available_gb = total_gb - _MODEL_MEMORY_GB - _OVERHEAD_GB
+    batch_size = max(1, int(available_gb / _PEAK_PER_BATCH_GB))
+    return min(batch_size, 16)
+
 
 class Qwen3Provider:
     """STT provider using qwen-asr (Qwen3-ASR + ForcedAligner).
 
-    - Internal chunking for long audio
+    - qwen-asr handles long audio internally (low-energy boundary splitting)
     - Word-level timestamps via ForcedAligner
     - No speaker diarization (all utterances "Speaker 0")
     """
+
+    handles_long_audio: bool = True
 
     def __init__(self, *, settings: Settings | None = None) -> None:
         if settings is None:
             from voxtract.config import get_settings
             settings = get_settings()
         self._settings = settings
-        self._model_repo = getattr(settings, "stt_model", None) or _DEFAULT_MODEL
-        self._aligner_repo = getattr(settings, "stt_aligner", None) or _DEFAULT_ALIGNER
+        self._model_repo = settings.stt_model or _DEFAULT_MODEL
+        self._aligner_repo = settings.stt_aligner or _DEFAULT_ALIGNER
         self._model = None
 
     def _load_model(self):
@@ -64,7 +91,7 @@ class Qwen3Provider:
         else:
             dtype = torch.float32
 
-        batch_size = resolve_batch_size(device)
+        batch_size = _resolve_batch_size(device)
         logger.info(
             "Loading Qwen3 ASR on device=%s dtype=%s batch_size=%d",
             device, dtype, batch_size,
@@ -78,7 +105,7 @@ class Qwen3Provider:
                 dtype=dtype,
                 device_map=device,
                 attn_implementation=attn_impl,
-                max_new_tokens=4096,
+                max_new_tokens=512,
                 max_inference_batch_size=batch_size,
                 forced_aligner=self._aligner_repo,
                 forced_aligner_kwargs=dict(
@@ -87,6 +114,9 @@ class Qwen3Provider:
                     attn_implementation=attn_impl,
                 ),
             )
+            # Disable KV cache — saves VRAM, no effect on output quality
+            if hasattr(self._model, 'model') and hasattr(self._model.model, 'config'):
+                self._model.model.config.use_cache = False
         except Exception as exc:
             raise STTError(
                 f"Failed to load Qwen3 ASR model '{self._model_repo}': {exc}",
@@ -109,7 +139,7 @@ class Qwen3Provider:
             )
 
         model = self._load_model()
-        context = getattr(self._settings, "stt_context", "") or ""
+        context = self._settings.stt_context or ""
 
         try:
             results = model.transcribe(
@@ -132,7 +162,7 @@ class Qwen3Provider:
         """Convert qwen-asr ASRTranscription to our Transcript model.
 
         Groups word-level timestamps into utterance-level segments
-        by splitting on pauses > _PAUSE_THRESHOLD_MS.
+        by splitting on pauses > _PAUSE_THRESHOLD_S.
         """
         utterances: list[Utterance] = []
 
@@ -176,6 +206,7 @@ class Qwen3Provider:
 
         utterances: list[Utterance] = []
         current_words: list[str] = []
+        current_word_ts: list[WordTimestamp] = []
         current_start: float = float(items[0].start_time)
         prev_end: float = float(items[0].end_time)
 
@@ -190,11 +221,18 @@ class Qwen3Provider:
                         start_time=current_start,
                         end_time=prev_end,
                         text=text,
+                        words=current_word_ts,
                     ))
                 current_words = []
+                current_word_ts = []
                 current_start = float(item.start_time)
 
             current_words.append(item.text)
+            current_word_ts.append(WordTimestamp(
+                text=item.text,
+                start_time=float(item.start_time),
+                end_time=float(item.end_time),
+            ))
             prev_end = float(item.end_time)
 
         if current_words:
@@ -205,6 +243,7 @@ class Qwen3Provider:
                     start_time=current_start,
                     end_time=prev_end,
                     text=text,
+                    words=current_word_ts,
                 ))
 
         return utterances

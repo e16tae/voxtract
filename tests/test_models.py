@@ -13,7 +13,20 @@ from voxtract.models import (
     ChunkInfo,
     Transcript,
     Utterance,
+    WordTimestamp,
 )
+
+
+class TestWordTimestamp:
+    def test_roundtrip(self) -> None:
+        wt = WordTimestamp(text="안녕하세요", start_time=0.0, end_time=1.2)
+        data = json.loads(wt.model_dump_json())
+        restored = WordTimestamp(**data)
+        assert restored == wt
+
+    def test_required_fields(self) -> None:
+        with pytest.raises(Exception):
+            WordTimestamp(text="hello")  # type: ignore[call-arg]
 
 
 class TestUtterance:
@@ -22,6 +35,31 @@ class TestUtterance:
         data = json.loads(u.model_dump_json())
         restored = Utterance(**data)
         assert restored == u
+
+    def test_roundtrip_with_words(self) -> None:
+        u = Utterance(
+            speaker="Speaker 1",
+            start_time=0.0,
+            end_time=3.5,
+            text="안녕하세요 반갑습니다",
+            words=[
+                WordTimestamp(text="안녕하세요", start_time=0.0, end_time=1.2),
+                WordTimestamp(text="반갑습니다", start_time=1.3, end_time=3.5),
+            ],
+        )
+        data = json.loads(u.model_dump_json())
+        restored = Utterance(**data)
+        assert restored == u
+        assert len(restored.words) == 2
+
+    def test_words_default_none(self) -> None:
+        u = Utterance(speaker="Speaker 1", start_time=0.0, end_time=1.0, text="hello")
+        assert u.words is None
+
+    def test_words_none_excluded_from_json(self) -> None:
+        u = Utterance(speaker="Speaker 1", start_time=0.0, end_time=1.0, text="hello")
+        data = u.model_dump(exclude_none=True)
+        assert "words" not in data
 
     def test_required_fields(self) -> None:
         with pytest.raises(Exception):

@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from voxtract.config import get_settings
+from voxtract.errors import SpeakerError
 from voxtract.models import Transcript, Utterance
 
 logger = logging.getLogger(__name__)
@@ -69,13 +70,16 @@ def run_pipeline(
     stt_provider: str | None = None,
     context: str | None = None,
     chunk_minutes: int | None = None,
+    num_speakers: int | None = None,
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
 ) -> dict:
     """Run the full transcribe → diarize pipeline.
 
     Long audio is automatically split into chunks for STT to avoid GPU OOM.
     Speaker diarization (pyannote) runs on the full audio for global consistency.
     """
-    from voxtract.audio.splitter import get_duration
+    from voxtract.audio.splitter import get_duration, convert_to_wav16k
     from voxtract.stt import get_provider as get_stt
 
     settings = get_settings()
@@ -85,28 +89,37 @@ def run_pipeline(
     chunk_min = chunk_minutes or settings.chunk_minutes
     stt = get_stt(stt_provider or settings.stt_provider, settings=settings)
 
-    # Step 1: Transcribe (with auto-split for long audio)
-    duration = get_duration(audio_path)
-    if duration > _CHUNK_THRESHOLD_MINUTES * 60:
-        transcript = _transcribe_chunked(
-            audio_path, stt, language, chunk_min, settings.overlap_seconds,
-        )
-    else:
-        transcript = stt.transcribe(audio_path, language=language)
+    # Pre-convert to 16kHz mono WAV (benchmark-matching conditions)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        wav_path = convert_to_wav16k(audio_path, output_dir=Path(tmp_dir))
 
-    # Step 2: Diarize on full audio (pyannote, ~1.6GB VRAM)
-    if len(transcript.speakers) <= 1:
-        try:
-            from voxtract.speaker.diarizer import diarize_transcript
-            transcript = diarize_transcript(
-                transcript, audio_path, settings=settings,
+        # Step 1: Transcribe (with auto-split for long audio)
+        duration = get_duration(audio_path)
+        handles_long = getattr(stt, "handles_long_audio", False)
+        if duration > _CHUNK_THRESHOLD_MINUTES * 60 and not handles_long:
+            transcript = _transcribe_chunked(
+                wav_path, stt, language, chunk_min, settings.overlap_seconds,
             )
-        except ImportError:
-            logger.warning("Speaker diarization not available (speaker extras not installed)")
-        except Exception as exc:
-            logger.warning("Speaker diarization failed: %s, continuing without", exc)
+        else:
+            transcript = stt.transcribe(wav_path, language=language)
 
-    # Write output
+        # Step 2: Diarize (WAV already in correct format, no re-conversion needed)
+        if len(transcript.speakers) <= 1:
+            try:
+                from voxtract.speaker.diarizer import diarize_transcript
+                transcript = diarize_transcript(
+                    transcript, wav_path,
+                    num_speakers=num_speakers,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                    settings=settings,
+                )
+            except ImportError:
+                logger.warning("Speaker diarization not available (speaker extras not installed)")
+            except SpeakerError as exc:
+                logger.warning("Speaker diarization failed: %s, continuing without", exc)
+
+    # Write output (outside temp dir context — WAV no longer needed)
     if output is not None:
         out_path = Path(output)
     elif output_dir is not None:

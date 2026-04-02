@@ -85,3 +85,41 @@ class TestSplitAudio:
         chunks = split_audio(long_mp3, output_dir=tmp_path, chunk_minutes=3, overlap_seconds=60)
         for chunk in chunks:
             assert Path(chunk.audio_path).stat().st_size > 0
+
+
+class TestConvertToWav16k:
+    def test_converts_mp3_to_wav(self, short_mp3: Path, tmp_path: Path) -> None:
+        from voxtract.audio.splitter import convert_to_wav16k
+
+        wav_path = convert_to_wav16k(short_mp3, output_dir=tmp_path)
+
+        assert wav_path.suffix == ".wav"
+        assert wav_path.exists()
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=sample_rate,channels", "-of", "csv=p=0",
+             str(wav_path)],
+            capture_output=True, text=True,
+        )
+        parts = result.stdout.strip().split(",")
+        assert parts[0] == "16000"
+        assert parts[1] == "1"
+
+    def test_wav_already_16k_mono_returns_original(self, tmp_path: Path) -> None:
+        from voxtract.audio.splitter import convert_to_wav16k
+
+        wav_path = tmp_path / "already.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+             "-t", "1", "-c:a", "pcm_s16le", "-loglevel", "error", str(wav_path)],
+            check=True, capture_output=True,
+        )
+
+        result = convert_to_wav16k(wav_path, output_dir=tmp_path)
+        assert result == wav_path
+
+    def test_nonexistent_file_raises(self, tmp_path: Path) -> None:
+        from voxtract.audio.splitter import convert_to_wav16k
+
+        with pytest.raises(AudioError, match="not found"):
+            convert_to_wav16k(tmp_path / "nope.mp3", output_dir=tmp_path)

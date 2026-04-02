@@ -95,6 +95,9 @@ def transcribe(
 @click.option("--stt-provider", default=None)
 @click.option("--context", "-c", default=None, help="Contextual hints for ASR (topic, names, jargon).")
 @click.option("--chunk-minutes", type=int, default=None, help="Audio chunk size in minutes (default: 25).")
+@click.option("--num-speakers", type=int, default=None, help="Exact number of speakers (if known).")
+@click.option("--min-speakers", type=int, default=None, help="Minimum number of speakers.")
+@click.option("--max-speakers", type=int, default=None, help="Maximum number of speakers.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON for agent consumption.")
 def process(
     audio_path: Path,
@@ -104,6 +107,9 @@ def process(
     stt_provider: str | None,
     context: str | None,
     chunk_minutes: int | None,
+    num_speakers: int | None,
+    min_speakers: int | None,
+    max_speakers: int | None,
     as_json: bool,
 ) -> None:
     """Full pipeline: audio → transcribe → diarize → transcript JSON."""
@@ -118,6 +124,9 @@ def process(
             stt_provider=stt_provider,
             context=context,
             chunk_minutes=chunk_minutes,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
         )
     except VoxtractError as e:
         if as_json:

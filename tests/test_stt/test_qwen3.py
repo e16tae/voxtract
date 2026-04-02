@@ -14,8 +14,8 @@ from voxtract.models import Transcript
 @dataclass
 class FakeAlignItem:
     text: str
-    start_time: int  # milliseconds
-    end_time: int
+    start_time: float  # seconds
+    end_time: float
 
 @dataclass
 class FakeAlignResult:
@@ -41,6 +41,26 @@ class TestQwen3Provider:
         from voxtract.stt.qwen3 import Qwen3Provider
         provider = Qwen3Provider.__new__(Qwen3Provider)
         assert isinstance(provider, STTProvider)
+
+    def test_handles_long_audio(self) -> None:
+        from voxtract.stt.qwen3 import Qwen3Provider
+        provider = Qwen3Provider()
+        assert provider.handles_long_audio is True
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_use_cache_false(self, mock_device, mock_model_cls) -> None:
+        """Model should be loaded with use_cache=False set on model.config."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model.model.config.use_cache = True
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        provider = Qwen3Provider()
+        provider._load_model()
+
+        assert mock_model.model.config.use_cache is False
 
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
@@ -103,6 +123,55 @@ class TestBuildTranscript:
         assert "첫 문장." in transcript.utterances[0].text
         assert "두 번째 문장." in transcript.utterances[1].text
 
+    def test_utterances_contain_word_timestamps(self) -> None:
+        """Each utterance should carry per-word timestamps from ForcedAligner."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="안녕 세상",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="안녕", start_time=0.0, end_time=0.8),
+                FakeAlignItem(text="세상", start_time=0.9, end_time=1.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 1
+        utt = transcript.utterances[0]
+        assert utt.words is not None
+        assert len(utt.words) == 2
+        assert utt.words[0].text == "안녕"
+        assert utt.words[0].start_time == 0.0
+        assert utt.words[0].end_time == 0.8
+        assert utt.words[1].text == "세상"
+
+    def test_word_timestamps_split_across_utterances(self) -> None:
+        """Word timestamps should be partitioned correctly when pause splits utterances."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="A B C",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="A", start_time=0.0, end_time=0.5),
+                # 2-second pause
+                FakeAlignItem(text="B", start_time=2.5, end_time=3.0),
+                FakeAlignItem(text="C", start_time=3.0, end_time=3.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 2
+        assert len(transcript.utterances[0].words) == 1
+        assert len(transcript.utterances[1].words) == 2
+
     def test_no_timestamps_uses_full_text(self) -> None:
         from voxtract.stt.qwen3 import Qwen3Provider
 
@@ -129,3 +198,32 @@ class TestBuildTranscript:
 
         transcript = provider._build_transcript(result, Path("test.mp3"))
         assert len(transcript.utterances) == 0
+
+
+class TestPipelineChunkingSkip:
+    """Verify pipeline skips external chunking for handles_long_audio providers."""
+
+    @patch("voxtract.audio.splitter.get_duration", return_value=3600)
+    @patch("voxtract.pipeline._transcribe_chunked")
+    def test_skips_chunking_for_qwen3(self, mock_chunked, mock_duration, tmp_path):
+        from voxtract.pipeline import run_pipeline
+
+        fake_transcript = Transcript(
+            language="ko", speakers=["Speaker 0"], utterances=[], metadata={},
+        )
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = fake_transcript
+
+        wav_path = tmp_path / "long.wav"
+        wav_path.touch()
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript):
+            audio = tmp_path / "long.wav"
+            audio.touch()
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+        mock_chunked.assert_not_called()
+        mock_provider.transcribe.assert_called_once()
