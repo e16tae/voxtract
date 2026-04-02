@@ -62,6 +62,33 @@ class TestQwen3Provider:
 
         assert mock_model.model.config.use_cache is False
 
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_max_tokens_from_settings(self, mock_device, mock_model_cls) -> None:
+        """max_new_tokens should be read from settings.stt_max_tokens."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        settings = Settings(stt_max_tokens=1024)
+        provider = Qwen3Provider(settings=settings)
+        provider._load_model()
+
+        call_kwargs = mock_model_cls.from_pretrained.call_args[1]
+        assert call_kwargs["max_new_tokens"] == 1024
+
+    def test_resolve_language_maps_iso_codes(self) -> None:
+        from voxtract.stt.qwen3 import _resolve_language
+
+        assert _resolve_language("ko") == "Korean"
+        assert _resolve_language("en") == "English"
+        assert _resolve_language("KO") == "Korean"  # case insensitive
+        assert _resolve_language("Korean") == "Korean"  # passthrough
+        assert _resolve_language("unknown") == "unknown"  # passthrough
+        assert _resolve_language(None) is None
+
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
         from voxtract.stt.qwen3 import Qwen3Provider

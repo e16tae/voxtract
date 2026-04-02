@@ -118,6 +118,39 @@ class TestConvertToWav16k:
         result = convert_to_wav16k(wav_path, output_dir=tmp_path)
         assert result == wav_path
 
+    def test_normalize_applies_loudnorm(self, short_mp3: Path, tmp_path: Path) -> None:
+        from voxtract.audio.splitter import convert_to_wav16k
+
+        wav_path = convert_to_wav16k(short_mp3, output_dir=tmp_path, normalize=True)
+        assert wav_path.suffix == ".wav"
+        assert wav_path.exists()
+        # Verify it's valid 16kHz mono WAV
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=sample_rate,channels", "-of", "csv=p=0",
+             str(wav_path)],
+            capture_output=True, text=True,
+        )
+        parts = result.stdout.strip().split(",")
+        assert parts[0] == "16000"
+        assert parts[1] == "1"
+
+    def test_normalize_forces_reconversion(self, tmp_path: Path) -> None:
+        """Even if already 16k mono WAV, normalize=True should re-encode."""
+        from voxtract.audio.splitter import convert_to_wav16k
+
+        wav_path = tmp_path / "already.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+             "-t", "1", "-c:a", "pcm_s16le", "-loglevel", "error", str(wav_path)],
+            check=True, capture_output=True,
+        )
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        result = convert_to_wav16k(wav_path, output_dir=out_dir, normalize=True)
+        # Should NOT return original — must re-encode with loudnorm
+        assert result != wav_path
+
     def test_nonexistent_file_raises(self, tmp_path: Path) -> None:
         from voxtract.audio.splitter import convert_to_wav16k
 

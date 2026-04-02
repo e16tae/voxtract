@@ -68,8 +68,17 @@ def _is_wav16k_mono(audio_path: Path) -> bool:
         return False
 
 
-def convert_to_wav16k(audio_path: Path, *, output_dir: Path) -> Path:
-    """Convert audio to 16kHz mono PCM WAV. Returns original path if already matching."""
+def convert_to_wav16k(
+    audio_path: Path,
+    *,
+    output_dir: Path,
+    normalize: bool = False,
+) -> Path:
+    """Convert audio to 16kHz mono PCM WAV.
+
+    Returns original path if already matching (and normalize=False).
+    When normalize=True, applies EBU R128 loudness normalization via ffmpeg loudnorm.
+    """
     audio_path = Path(audio_path)
     if not audio_path.exists():
         raise AudioError(
@@ -78,7 +87,7 @@ def convert_to_wav16k(audio_path: Path, *, output_dir: Path) -> Path:
             recoverable=False,
         )
 
-    if _is_wav16k_mono(audio_path):
+    if not normalize and _is_wav16k_mono(audio_path):
         return audio_path
 
     if not check_ffmpeg():
@@ -89,13 +98,20 @@ def convert_to_wav16k(audio_path: Path, *, output_dir: Path) -> Path:
         )
 
     wav_path = output_dir / f"{audio_path.stem}.wav"
+    af_filters = []
+    if normalize:
+        af_filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
+
+    cmd = [
+        "ffmpeg", "-y", "-i", str(audio_path),
+        "-ar", "16000", "-ac", "1",
+    ]
+    if af_filters:
+        cmd += ["-af", ",".join(af_filters)]
+    cmd += ["-c:a", "pcm_s16le", "-loglevel", "error", str(wav_path)]
+
     try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(audio_path),
-             "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
-             "-loglevel", "error", str(wav_path)],
-            capture_output=True, text=True, timeout=300, check=True,
-        )
+        subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=True)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise AudioError(
             f"WAV conversion failed: {exc.stderr}",
@@ -103,7 +119,8 @@ def convert_to_wav16k(audio_path: Path, *, output_dir: Path) -> Path:
             recoverable=False,
         ) from exc
 
-    logger.info("Converted %s → %s (16kHz mono WAV)", audio_path.name, wav_path.name)
+    label = "16kHz mono WAV + loudnorm" if normalize else "16kHz mono WAV"
+    logger.info("Converted %s → %s (%s)", audio_path.name, wav_path.name, label)
     return wav_path
 
 
