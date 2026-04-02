@@ -123,6 +123,55 @@ class TestBuildTranscript:
         assert "첫 문장." in transcript.utterances[0].text
         assert "두 번째 문장." in transcript.utterances[1].text
 
+    def test_utterances_contain_word_timestamps(self) -> None:
+        """Each utterance should carry per-word timestamps from ForcedAligner."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="안녕 세상",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="안녕", start_time=0.0, end_time=0.8),
+                FakeAlignItem(text="세상", start_time=0.9, end_time=1.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 1
+        utt = transcript.utterances[0]
+        assert utt.words is not None
+        assert len(utt.words) == 2
+        assert utt.words[0].text == "안녕"
+        assert utt.words[0].start_time == 0.0
+        assert utt.words[0].end_time == 0.8
+        assert utt.words[1].text == "세상"
+
+    def test_word_timestamps_split_across_utterances(self) -> None:
+        """Word timestamps should be partitioned correctly when pause splits utterances."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        provider = Qwen3Provider.__new__(Qwen3Provider)
+        provider._model_repo = "test-model"
+
+        result = FakeASRTranscription(
+            language="Korean",
+            text="A B C",
+            time_stamps=FakeAlignResult(items=[
+                FakeAlignItem(text="A", start_time=0.0, end_time=0.5),
+                # 2-second pause
+                FakeAlignItem(text="B", start_time=2.5, end_time=3.0),
+                FakeAlignItem(text="C", start_time=3.0, end_time=3.5),
+            ]),
+        )
+
+        transcript = provider._build_transcript(result, Path("test.mp3"))
+        assert len(transcript.utterances) == 2
+        assert len(transcript.utterances[0].words) == 1
+        assert len(transcript.utterances[1].words) == 2
+
     def test_no_timestamps_uses_full_text(self) -> None:
         from voxtract.stt.qwen3 import Qwen3Provider
 

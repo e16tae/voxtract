@@ -12,7 +12,7 @@ from pathlib import Path
 from voxtract.audio.splitter import convert_to_wav16k
 from voxtract.config import Settings, resolve_device
 from voxtract.errors import SpeakerError
-from voxtract.models import Transcript, Utterance
+from voxtract.models import Transcript, Utterance, WordTimestamp
 
 logger = logging.getLogger(__name__)
 
@@ -101,37 +101,66 @@ def _split_by_speaker_change(
             result.append(utt)
             continue
 
-        # Split text proportionally by actual overlap duration (not utterance
-        # duration) so that gaps between segments don't skew word distribution
-        words = utt.text.split()
-        total_overlap = sum(e - s for s, e, _ in overlapping)
+        if utt.words is not None:
+            # Word-level timestamps available — assign each word to the
+            # speaker segment with the greatest overlap duration
+            seg_buckets: dict[int, list[WordTimestamp]] = {}
+            for wt in utt.words:
+                best_idx = 0
+                best_overlap = -1.0
+                for idx, (seg_start, seg_end, _speaker) in enumerate(overlapping):
+                    ov_start = max(wt.start_time, seg_start)
+                    ov_end = min(wt.end_time, seg_end)
+                    ov = ov_end - ov_start
+                    if ov > best_overlap:
+                        best_overlap = ov
+                        best_idx = idx
+                seg_buckets.setdefault(best_idx, []).append(wt)
 
-        for seg_start, seg_end, speaker in overlapping:
-            seg_duration = seg_end - seg_start
-            ratio = seg_duration / total_overlap
-            word_count = max(1, round(len(words) * ratio))
+            for idx, (seg_start, seg_end, speaker) in enumerate(overlapping):
+                bucket = seg_buckets.get(idx, [])
+                if not bucket:
+                    continue
+                text = " ".join(w.text for w in bucket).strip()
+                if text:
+                    result.append(Utterance(
+                        speaker=speaker,
+                        start_time=seg_start,
+                        end_time=seg_end,
+                        text=text,
+                        words=bucket,
+                    ))
+        else:
+            # Fallback: split text proportionally by overlap duration
+            words = utt.text.split()
+            total_overlap = sum(e - s for s, e, _ in overlapping)
 
-            seg_words = words[:word_count]
-            words = words[word_count:]
+            for seg_start, seg_end, speaker in overlapping:
+                seg_duration = seg_end - seg_start
+                ratio = seg_duration / total_overlap
+                word_count = max(1, round(len(words) * ratio))
 
-            text = " ".join(seg_words).strip()
-            if text:
-                result.append(Utterance(
-                    speaker=speaker,
-                    start_time=seg_start,
-                    end_time=seg_end,
-                    text=text,
-                ))
+                seg_words = words[:word_count]
+                words = words[word_count:]
 
-        # Remaining words go to last segment
-        if words:
-            last = result[-1]
-            result[-1] = Utterance(
-                speaker=last.speaker,
-                start_time=last.start_time,
-                end_time=last.end_time,
-                text=last.text + " " + " ".join(words),
-            )
+                text = " ".join(seg_words).strip()
+                if text:
+                    result.append(Utterance(
+                        speaker=speaker,
+                        start_time=seg_start,
+                        end_time=seg_end,
+                        text=text,
+                    ))
+
+            # Remaining words go to last segment
+            if words:
+                last = result[-1]
+                result[-1] = Utterance(
+                    speaker=last.speaker,
+                    start_time=last.start_time,
+                    end_time=last.end_time,
+                    text=last.text + " " + " ".join(words),
+                )
 
     return result
 
@@ -170,6 +199,7 @@ def _assign_speakers(
             start_time=utt.start_time,
             end_time=utt.end_time,
             text=utt.text,
+            words=utt.words,
         ))
 
     return new_utterances
@@ -190,6 +220,7 @@ def _normalize_speaker_labels(utterances: list[Utterance]) -> list[Utterance]:
             start_time=utt.start_time,
             end_time=utt.end_time,
             text=utt.text,
+            words=utt.words,
         ))
 
     return result

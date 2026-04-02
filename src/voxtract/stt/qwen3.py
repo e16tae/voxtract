@@ -13,7 +13,7 @@ from pathlib import Path
 
 from voxtract.config import Settings, resolve_device
 from voxtract.errors import STTError
-from voxtract.models import Transcript, Utterance
+from voxtract.models import Transcript, Utterance, WordTimestamp
 from voxtract.stt import register
 
 logger = logging.getLogger(__name__)
@@ -206,6 +206,7 @@ class Qwen3Provider:
 
         utterances: list[Utterance] = []
         current_words: list[str] = []
+        current_word_ts: list[WordTimestamp] = []
         current_start: float = float(items[0].start_time)
         prev_end: float = float(items[0].end_time)
 
@@ -220,11 +221,18 @@ class Qwen3Provider:
                         start_time=current_start,
                         end_time=prev_end,
                         text=text,
+                        words=current_word_ts,
                     ))
                 current_words = []
+                current_word_ts = []
                 current_start = float(item.start_time)
 
             current_words.append(item.text)
+            current_word_ts.append(WordTimestamp(
+                text=item.text,
+                start_time=float(item.start_time),
+                end_time=float(item.end_time),
+            ))
             prev_end = float(item.end_time)
 
         if current_words:
@@ -235,6 +243,7 @@ class Qwen3Provider:
                     start_time=current_start,
                     end_time=prev_end,
                     text=text,
+                    words=current_word_ts,
                 ))
 
         return utterances
