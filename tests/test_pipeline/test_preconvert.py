@@ -1,4 +1,4 @@
-"""Tests for audio pre-conversion in the pipeline."""
+"""Tests for audio pre-conversion and chunk merging in the pipeline."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from voxtract.models import Transcript
+from voxtract.models import ChunkInfo, Transcript, Utterance
 
 
 class TestPipelinePreconvert:
@@ -34,6 +34,9 @@ class TestPipelinePreconvert:
             run_pipeline(audio_path=audio, output=tmp_path / "out.json")
 
             mock_convert.assert_called_once()
+            # Normalize flag is forwarded from settings
+            _, kwargs = mock_convert.call_args
+            assert "normalize" in kwargs
             # STT receives the WAV path
             mock_provider.transcribe.assert_called_once()
             stt_audio_arg = mock_provider.transcribe.call_args[0][0]
@@ -41,3 +44,76 @@ class TestPipelinePreconvert:
             # Diarizer receives the WAV path
             diarize_audio_arg = mock_diarize.call_args[1].get("audio_path", mock_diarize.call_args[0][1])
             assert Path(diarize_audio_arg) == wav_path
+
+
+class TestMergeChunkDedup:
+    """Tests for fuzzy deduplication in chunk overlap merging."""
+
+    def test_exact_duplicate_removed(self) -> None:
+        """Same utterance in overlap region of two chunks → deduplicated."""
+        from voxtract.pipeline import _merge_chunk_transcripts
+
+        # Chunk 0: global 0-120s, Chunk 1: global 60-180s → overlap at 60-120s
+        chunks = [
+            ChunkInfo(index=0, start_time=0.0, end_time=120.0, audio_path="/tmp/c0"),
+            ChunkInfo(index=1, start_time=60.0, end_time=180.0, audio_path="/tmp/c1"),
+        ]
+        # Utterance at global ~90s appears in both chunks
+        transcripts = [
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                Utterance(speaker="Speaker 0", start_time=90.0, end_time=95.0, text="안녕하세요"),
+            ], metadata={}),
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                # local 30-35s in chunk1 → global 90-95s (same utterance)
+                Utterance(speaker="Speaker 0", start_time=30.0, end_time=35.0, text="안녕하세요"),
+            ], metadata={}),
+        ]
+
+        result = _merge_chunk_transcripts(chunks, transcripts)
+        texts = [u.text for u in result.utterances]
+        assert texts.count("안녕하세요") == 1
+
+    def test_fuzzy_duplicate_removed(self) -> None:
+        """Near-identical STT output in overlap region → deduplicated via fuzzy match."""
+        from voxtract.pipeline import _merge_chunk_transcripts
+
+        chunks = [
+            ChunkInfo(index=0, start_time=0.0, end_time=120.0, audio_path="/tmp/c0"),
+            ChunkInfo(index=1, start_time=60.0, end_time=180.0, audio_path="/tmp/c1"),
+        ]
+        transcripts = [
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                Utterance(speaker="Speaker 0", start_time=90.0, end_time=95.0,
+                          text="안녕하세요 반갑습니다"),
+            ], metadata={}),
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                # local 30-35s → global 90-95s, minor STT variance (extra period)
+                Utterance(speaker="Speaker 0", start_time=30.0, end_time=35.0,
+                          text="안녕하세요. 반갑습니다"),
+            ], metadata={}),
+        ]
+
+        result = _merge_chunk_transcripts(chunks, transcripts)
+        assert len(result.utterances) == 1
+
+    def test_different_utterances_not_removed(self) -> None:
+        """Completely different utterances at same time → both kept."""
+        from voxtract.pipeline import _merge_chunk_transcripts
+
+        chunks = [
+            ChunkInfo(index=0, start_time=0.0, end_time=120.0, audio_path="/tmp/c0"),
+            ChunkInfo(index=1, start_time=60.0, end_time=180.0, audio_path="/tmp/c1"),
+        ]
+        transcripts = [
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                Utterance(speaker="Speaker 0", start_time=90.0, end_time=95.0,
+                          text="첫 번째 문장입니다"),
+            ], metadata={}),
+            Transcript(language="ko", speakers=["Speaker 0"], utterances=[
+                Utterance(speaker="Speaker 0", start_time=30.0, end_time=35.0,
+                          text="완전히 다른 문장입니다"),
+            ], metadata={}),
+        ]
+
+        result = _merge_chunk_transcripts(chunks, transcripts)
+        assert len(result.utterances) == 2

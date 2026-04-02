@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from voxtract.config import get_settings
@@ -31,13 +32,16 @@ def _merge_chunk_transcripts(
                 start_time=utt.start_time + offset,
                 end_time=utt.end_time + offset,
                 text=utt.text,
+                words=utt.words,
             )
 
             if all_utterances:
                 last = all_utterances[-1]
-                if (
-                    adjusted.start_time <= last.end_time
-                    and adjusted.text == last.text
+                if adjusted.start_time <= last.end_time and (
+                    adjusted.text == last.text
+                    or SequenceMatcher(
+                        None, adjusted.text, last.text,
+                    ).ratio() >= 0.85
                 ):
                     continue
 
@@ -91,7 +95,10 @@ def run_pipeline(
 
     # Pre-convert to 16kHz mono WAV (benchmark-matching conditions)
     with tempfile.TemporaryDirectory() as tmp_dir:
-        wav_path = convert_to_wav16k(audio_path, output_dir=Path(tmp_dir))
+        wav_path = convert_to_wav16k(
+            audio_path, output_dir=Path(tmp_dir),
+            normalize=settings.audio_normalize,
+        )
 
         # Step 1: Transcribe (with auto-split for long audio)
         duration = get_duration(audio_path)

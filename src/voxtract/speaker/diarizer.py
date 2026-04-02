@@ -54,155 +54,115 @@ def _load_pipeline(device: str, *, settings: Settings | None = None):
     return pipeline
 
 
-_MIN_SPLIT_DURATION_S = 2.0  # Don't split utterances shorter than this
+_PAUSE_THRESHOLD_S = 1.5  # Same-speaker gap > this → new utterance
 
 
-def _split_by_speaker_change(
+def _assign_word_speaker(
+    word: WordTimestamp,
+    segments: list[tuple[float, float, str]],
+) -> str:
+    """Assign a single word to the speaker segment with greatest overlap."""
+    best_speaker = "Speaker 0"
+    best_overlap = 0.0
+    mid = (word.start_time + word.end_time) / 2
+
+    for seg_start, seg_end, speaker in segments:
+        ov_start = max(word.start_time, seg_start)
+        ov_end = min(word.end_time, seg_end)
+        ov = ov_end - ov_start
+        if ov > best_overlap:
+            best_overlap = ov
+            best_speaker = speaker
+
+    if best_overlap <= 0.0 and segments:
+        # Zero-duration word or in a gap — check midpoint containment first
+        for seg_start, seg_end, speaker in segments:
+            if seg_start <= mid <= seg_end:
+                return speaker
+        # Fall back to nearest segment
+        best_dist = float("inf")
+        for seg_start, seg_end, speaker in segments:
+            dist = min(abs(mid - seg_start), abs(mid - seg_end))
+            if dist < best_dist:
+                best_dist = dist
+                best_speaker = speaker
+
+    return best_speaker
+
+
+def _build_utterances_from_words(
     utterances: list[Utterance],
     segments: list[tuple[float, float, str]],
+    pause_threshold: float = _PAUSE_THRESHOLD_S,
 ) -> list[Utterance]:
-    """Split utterances that span speaker change boundaries.
+    """Assign speakers at word level, then re-group into utterances.
 
-    When an utterance's time range crosses from one speaker segment to another,
-    split it at the boundary. Text is proportionally divided based on time.
-    Short utterances (<_MIN_SPLIT_DURATION_S) are not split.
+    Flattens all word timestamps from input utterances, assigns each word
+    to the best-matching diarizer segment, and groups consecutive words
+    by speaker continuity and pause gaps.
     """
-    if not utterances or not segments:
-        return utterances
+    if not utterances:
+        return []
 
-    result: list[Utterance] = []
-
+    # Flatten all words; fall back to utterance-level if no word timestamps
+    all_words: list[WordTimestamp] = []
+    has_word_timestamps = False
     for utt in utterances:
-        duration = utt.end_time - utt.start_time
-        if duration < _MIN_SPLIT_DURATION_S:
-            result.append(utt)
-            continue
-
-        # Find all speaker segments that overlap this utterance
-        overlapping = []
-        for seg_start, seg_end, speaker in segments:
-            overlap_start = max(utt.start_time, seg_start)
-            overlap_end = min(utt.end_time, seg_end)
-            if overlap_end > overlap_start:
-                overlapping.append((overlap_start, overlap_end, speaker))
-
-        # Merge consecutive segments with the same speaker to avoid
-        # unnecessary splits (pyannote can emit adjacent same-speaker segments)
-        merged: list[tuple[float, float, str]] = []
-        for seg in overlapping:
-            if merged and merged[-1][2] == seg[2]:
-                prev = merged[-1]
-                merged[-1] = (prev[0], seg[1], seg[2])
-            else:
-                merged.append(seg)
-        overlapping = merged
-
-        if len(overlapping) <= 1:
-            result.append(utt)
-            continue
-
-        if utt.words is not None:
-            # Word-level timestamps available — assign each word to the
-            # speaker segment with the greatest overlap duration
-            seg_buckets: dict[int, list[WordTimestamp]] = {}
-            for wt in utt.words:
-                best_idx = 0
-                best_overlap = -1.0
-                for idx, (seg_start, seg_end, _speaker) in enumerate(overlapping):
-                    ov_start = max(wt.start_time, seg_start)
-                    ov_end = min(wt.end_time, seg_end)
-                    ov = ov_end - ov_start
-                    if ov > best_overlap:
-                        best_overlap = ov
-                        best_idx = idx
-                seg_buckets.setdefault(best_idx, []).append(wt)
-
-            for idx, (seg_start, seg_end, speaker) in enumerate(overlapping):
-                bucket = seg_buckets.get(idx, [])
-                if not bucket:
-                    continue
-                text = " ".join(w.text for w in bucket).strip()
-                if text:
-                    result.append(Utterance(
-                        speaker=speaker,
-                        start_time=seg_start,
-                        end_time=seg_end,
-                        text=text,
-                        words=bucket,
-                    ))
+        if utt.words:
+            all_words.extend(utt.words)
+            has_word_timestamps = True
         else:
-            # Fallback: split text proportionally by overlap duration
-            words = utt.text.split()
-            total_overlap = sum(e - s for s, e, _ in overlapping)
+            all_words.append(WordTimestamp(
+                text=utt.text,
+                start_time=utt.start_time,
+                end_time=utt.end_time,
+            ))
 
-            for seg_start, seg_end, speaker in overlapping:
-                seg_duration = seg_end - seg_start
-                ratio = seg_duration / total_overlap
-                word_count = max(1, round(len(words) * ratio))
+    if not all_words:
+        return []
 
-                seg_words = words[:word_count]
-                words = words[word_count:]
+    if not segments:
+        # No diarizer segments — keep original speaker, re-group by pause
+        word_speakers = [(w, utterances[0].speaker) for w in all_words]
+    else:
+        word_speakers = [(w, _assign_word_speaker(w, segments)) for w in all_words]
 
-                text = " ".join(seg_words).strip()
+    # Group consecutive words by speaker + pause threshold
+    result: list[Utterance] = []
+    current_words: list[WordTimestamp] = []
+    current_speaker = ""
+
+    for word, speaker in word_speakers:
+        if current_words:
+            gap = word.start_time - current_words[-1].end_time
+            if speaker != current_speaker or gap > pause_threshold:
+                text = " ".join(w.text for w in current_words).strip()
                 if text:
                     result.append(Utterance(
-                        speaker=speaker,
-                        start_time=seg_start,
-                        end_time=seg_end,
+                        speaker=current_speaker,
+                        start_time=current_words[0].start_time,
+                        end_time=current_words[-1].end_time,
                         text=text,
+                        words=current_words if has_word_timestamps else None,
                     ))
+                current_words = []
 
-            # Remaining words go to last segment
-            if words:
-                last = result[-1]
-                result[-1] = Utterance(
-                    speaker=last.speaker,
-                    start_time=last.start_time,
-                    end_time=last.end_time,
-                    text=last.text + " " + " ".join(words),
-                )
+        current_words.append(word)
+        current_speaker = speaker
+
+    if current_words:
+        text = " ".join(w.text for w in current_words).strip()
+        if text:
+            result.append(Utterance(
+                speaker=current_speaker,
+                start_time=current_words[0].start_time,
+                end_time=current_words[-1].end_time,
+                text=text,
+                words=current_words if has_word_timestamps else None,
+            ))
 
     return result
 
-
-def _assign_speakers(
-    utterances: list[Utterance],
-    segments: list[tuple[float, float, str]],
-) -> list[Utterance]:
-    """Assign pyannote speaker labels to utterances by time overlap."""
-    new_utterances = []
-    for utt in utterances:
-        mid = (utt.start_time + utt.end_time) / 2
-        best_speaker = "Speaker 0"
-        best_overlap = 0.0
-
-        for seg_start, seg_end, speaker in segments:
-            overlap_start = max(utt.start_time, seg_start)
-            overlap_end = min(utt.end_time, seg_end)
-            overlap = max(0.0, overlap_end - overlap_start)
-
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_speaker = speaker
-
-        if best_overlap == 0.0 and segments:
-            # No overlap found; assign the temporally nearest segment's speaker
-            best_dist = float("inf")
-            for seg_start, seg_end, speaker in segments:
-                dist = min(abs(mid - seg_start), abs(mid - seg_end))
-                if dist < best_dist:
-                    best_dist = dist
-                    best_speaker = speaker
-
-        new_utterances.append(Utterance(
-            speaker=best_speaker,
-            start_time=utt.start_time,
-            end_time=utt.end_time,
-            text=utt.text,
-            words=utt.words,
-        ))
-
-    return new_utterances
 
 
 def _normalize_speaker_labels(utterances: list[Utterance]) -> list[Utterance]:
@@ -274,13 +234,12 @@ def diarize_transcript(
     else:
         diarization = result
 
-    # Extract segments once; used by both _assign_speakers and _split_by_speaker_change
+    # Extract segments for word-level speaker assignment
     segments = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):
         segments.append((turn.start, turn.end, speaker))
 
-    new_utterances = _assign_speakers(transcript.utterances, segments)
-    new_utterances = _split_by_speaker_change(new_utterances, segments)
+    new_utterances = _build_utterances_from_words(transcript.utterances, segments)
     new_utterances = _normalize_speaker_labels(new_utterances)
     new_speakers = sorted({u.speaker for u in new_utterances})
 

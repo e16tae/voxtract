@@ -22,6 +22,28 @@ _DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 _DEFAULT_ALIGNER = "Qwen/Qwen3-ForcedAligner-0.6B"
 _PAUSE_THRESHOLD_S = 1.5  # gap > 1.5s between words → new utterance
 
+# ISO 639-1 → Qwen3 language name mapping
+_LANG_MAP: dict[str, str] = {
+    "zh": "Chinese", "en": "English", "yue": "Cantonese",
+    "ar": "Arabic", "de": "German", "fr": "French",
+    "es": "Spanish", "pt": "Portuguese", "id": "Indonesian",
+    "it": "Italian", "ko": "Korean", "ru": "Russian",
+    "th": "Thai", "vi": "Vietnamese", "ja": "Japanese",
+    "tr": "Turkish", "hi": "Hindi", "ms": "Malay",
+    "nl": "Dutch", "sv": "Swedish", "da": "Danish",
+    "fi": "Finnish", "pl": "Polish", "cs": "Czech",
+    "fil": "Filipino", "fa": "Persian", "el": "Greek",
+    "ro": "Romanian", "hu": "Hungarian", "mk": "Macedonian",
+}
+
+
+def _resolve_language(language: str | None) -> str | None:
+    """Map ISO 639-1 codes to Qwen3 full language names."""
+    if language is None:
+        return None
+    return _LANG_MAP.get(language.lower(), language)
+
+
 # Empirical constants from RTX 4070 SUPER (12GB) testing.
 # Actual model weights: ASR ~4.46GB + Aligner ~1.84GB = ~6.3GB (bf16).
 # _MODEL_MEMORY_GB represents peak inference VRAM baseline (weights + activations),
@@ -105,7 +127,7 @@ class Qwen3Provider:
                 dtype=dtype,
                 device_map=device,
                 attn_implementation=attn_impl,
-                max_new_tokens=512,
+                max_new_tokens=self._settings.stt_max_tokens,
                 max_inference_batch_size=batch_size,
                 forced_aligner=self._aligner_repo,
                 forced_aligner_kwargs=dict(
@@ -145,7 +167,7 @@ class Qwen3Provider:
             results = model.transcribe(
                 audio=str(audio_path),
                 context=context,
-                language=language,
+                language=_resolve_language(language),
                 return_time_stamps=True,
             )
         except Exception as exc:

@@ -20,9 +20,13 @@ class Settings(BaseSettings):
     stt_model: str = "Qwen/Qwen3-ASR-1.7B"
     stt_aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     stt_context: str = ""  # contextual hints for ASR (e.g. topic, names, jargon)
+    stt_max_tokens: int = 512  # max generated tokens per inference batch
 
     # Speaker diarization
     speaker_model: str = "pyannote/speaker-diarization-community-1"
+
+    # Audio preprocessing
+    audio_normalize: bool = False  # apply EBU R128 loudness normalization before STT
 
     # Chunking
     chunk_minutes: int = 25

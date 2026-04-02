@@ -8,7 +8,7 @@ import pytest
 
 from voxtract.models import Transcript, Utterance
 from voxtract.speaker.diarizer import (
-    _assign_speakers,
+    _assign_word_speaker,
     _load_pipeline,
     _normalize_speaker_labels,
     diarize_transcript,
@@ -46,49 +46,45 @@ class _FakeDiarization:
             yield _FakeTurn(start, end), None, speaker
 
 
-class TestAssignSpeakers:
+class TestAssignWordSpeaker:
     def test_assigns_by_overlap(self) -> None:
-        utts = [
-            Utterance(speaker="Speaker 0", start_time=0.0, end_time=10.0, text="A"),
-            Utterance(speaker="Speaker 0", start_time=12.0, end_time=22.0, text="B"),
-        ]
+        from voxtract.models import WordTimestamp
+
+        word = WordTimestamp(text="A", start_time=0.0, end_time=10.0)
         segments = [
             (0.0, 11.0, "SPEAKER_00"),
             (11.5, 23.0, "SPEAKER_01"),
         ]
 
-        result = _assign_speakers(utts, segments)
+        result = _assign_word_speaker(word, segments)
+        assert result == "SPEAKER_00"
 
-        assert result[0].speaker == "SPEAKER_00"
-        assert result[1].speaker == "SPEAKER_01"
-        assert result[0].text == "A"
+    def test_midpoint_containment_fallback(self) -> None:
+        """Zero-duration word inside a segment should match via midpoint."""
+        from voxtract.models import WordTimestamp
 
-    def test_nearest_segment_fallback(self) -> None:
-        """Zero-duration utterance should match the nearest segment."""
-        utts = [
-            Utterance(speaker="Speaker 0", start_time=5.0, end_time=5.0, text="짧은 발화"),
-        ]
+        word = WordTimestamp(text="네", start_time=5.0, end_time=5.0)
         segments = [
             (0.0, 3.0, "SPEAKER_00"),
             (4.0, 8.0, "SPEAKER_01"),
         ]
 
-        result = _assign_speakers(utts, segments)
-        assert result[0].speaker == "SPEAKER_01"
+        result = _assign_word_speaker(word, segments)
+        assert result == "SPEAKER_01"
 
     def test_nearest_segment_in_gap(self) -> None:
-        """Utterance in a gap between segments should match the nearest one."""
-        utts = [
-            Utterance(speaker="Speaker 0", start_time=3.1, end_time=3.9, text="갭 발화"),
-        ]
+        """Word in a gap between segments should match the nearest one."""
+        from voxtract.models import WordTimestamp
+
+        word = WordTimestamp(text="갭", start_time=3.1, end_time=3.9)
         segments = [
             (0.0, 3.0, "SPEAKER_00"),
             (5.0, 10.0, "SPEAKER_01"),
         ]
 
-        result = _assign_speakers(utts, segments)
+        result = _assign_word_speaker(word, segments)
         # mid=3.5, dist to (0,3)=0.5, dist to (5,10)=1.5 → SPEAKER_00 is nearer
-        assert result[0].speaker == "SPEAKER_00"
+        assert result == "SPEAKER_00"
 
 
 class TestNormalizeSpeakerLabels:
