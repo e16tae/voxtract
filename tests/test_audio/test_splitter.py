@@ -115,7 +115,7 @@ class TestConvertToWav16k:
             check=True, capture_output=True,
         )
 
-        result = convert_to_wav16k(wav_path, output_dir=tmp_path)
+        result = convert_to_wav16k(wav_path, output_dir=tmp_path, normalize=False, highpass=False)
         assert result == wav_path
 
     def test_normalize_applies_loudnorm(self, short_mp3: Path, tmp_path: Path) -> None:

@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     speaker_model: str = "pyannote/speaker-diarization-community-1"
 
     # Audio preprocessing
-    audio_normalize: bool = False  # apply EBU R128 loudness normalization before STT
+    audio_normalize: bool = True   # apply EBU R128 loudness normalization before STT
+    audio_highpass: bool = True    # apply 80Hz high-pass filter to remove low-frequency rumble
 
     # Chunking
     chunk_minutes: int = 25

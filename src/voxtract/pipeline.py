@@ -98,6 +98,7 @@ def run_pipeline(
         wav_path = convert_to_wav16k(
             audio_path, output_dir=Path(tmp_dir),
             normalize=settings.audio_normalize,
+            highpass=settings.audio_highpass,
         )
 
         # Step 1: Transcribe (with auto-split for long audio)

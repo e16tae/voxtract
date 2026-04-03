@@ -47,6 +47,9 @@ def transcribe(
     as_json: bool,
 ) -> None:
     """Transcribe audio file to a transcript JSON (no diarization)."""
+    import tempfile
+
+    from voxtract.audio.splitter import convert_to_wav16k
     from voxtract.config import get_settings
     from voxtract.stt import get_provider
     from voxtract.errors import STTError
@@ -58,7 +61,13 @@ def transcribe(
 
     try:
         provider = get_provider(provider_name, settings=settings)
-        transcript = provider.transcribe(audio_path, language=language)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wav_path = convert_to_wav16k(
+                audio_path, output_dir=Path(tmp_dir),
+                normalize=settings.audio_normalize,
+                highpass=settings.audio_highpass,
+            )
+            transcript = provider.transcribe(wav_path, language=language)
     except VoxtractError as e:
         if as_json:
             _output_error("transcribe", e)
