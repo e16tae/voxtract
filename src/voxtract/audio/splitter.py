@@ -72,12 +72,14 @@ def convert_to_wav16k(
     audio_path: Path,
     *,
     output_dir: Path,
-    normalize: bool = False,
+    normalize: bool = True,
+    highpass: bool = True,
 ) -> Path:
     """Convert audio to 16kHz mono PCM WAV.
 
-    Returns original path if already matching (and normalize=False).
+    Returns original path if already matching (and no filters enabled).
     When normalize=True, applies EBU R128 loudness normalization via ffmpeg loudnorm.
+    When highpass=True, applies 80Hz high-pass filter to remove low-frequency rumble.
     """
     audio_path = Path(audio_path)
     if not audio_path.exists():
@@ -87,7 +89,7 @@ def convert_to_wav16k(
             recoverable=False,
         )
 
-    if not normalize and _is_wav16k_mono(audio_path):
+    if not normalize and not highpass and _is_wav16k_mono(audio_path):
         return audio_path
 
     if not check_ffmpeg():
@@ -99,6 +101,8 @@ def convert_to_wav16k(
 
     wav_path = output_dir / f"{audio_path.stem}.wav"
     af_filters = []
+    if highpass:
+        af_filters.append("highpass=f=80")
     if normalize:
         af_filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
 
@@ -119,7 +123,8 @@ def convert_to_wav16k(
             recoverable=False,
         ) from exc
 
-    label = "16kHz mono WAV + loudnorm" if normalize else "16kHz mono WAV"
+    filters_label = "+".join(f for f in ["highpass" if highpass else "", "loudnorm" if normalize else ""] if f)
+    label = f"16kHz mono WAV + {filters_label}" if filters_label else "16kHz mono WAV"
     logger.info("Converted %s → %s (%s)", audio_path.name, wav_path.name, label)
     return wav_path
 
