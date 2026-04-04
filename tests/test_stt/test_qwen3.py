@@ -324,3 +324,60 @@ class TestConfigDefaults:
         from voxtract.config import Settings
         settings = Settings()
         assert settings.stt_max_tokens == 2048
+
+
+class TestLanguageFallback:
+    """Verify language fallback: CLI --language > settings.language."""
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_provider_resolves_language_code_to_full_name(
+        self, mock_device, mock_model_cls, tmp_path,
+    ) -> None:
+        """Provider should resolve ISO code (e.g. 'ko') to full name ('Korean') for the model."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = [
+            MagicMock(language="Korean", text="테스트", time_stamps=None),
+        ]
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        wav = tmp_path / "test.wav"
+        wav.touch()
+
+        settings = Settings(language="ko")
+        provider = Qwen3Provider(settings=settings)
+        provider.transcribe(wav, language="ko")
+
+        call_kwargs = mock_model.transcribe.call_args[1]
+        assert call_kwargs["language"] == "Korean"
+
+    def test_pipeline_passes_settings_language(self, tmp_path) -> None:
+        """Pipeline should use settings.language when language param is None."""
+        from voxtract.models import Transcript
+        from voxtract.pipeline import run_pipeline
+
+        fake_transcript = Transcript(
+            language="ko", speakers=["Speaker 0"], utterances=[], metadata={},
+        )
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = fake_transcript
+
+        wav_path = tmp_path / "audio.wav"
+        wav_path.touch()
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.get_duration", return_value=60.0), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript):
+
+            audio = tmp_path / "input.m4a"
+            audio.touch()
+            # language=None → should fallback to settings.language ("ko")
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+        call_kwargs = mock_provider.transcribe.call_args[1]
+        assert call_kwargs["language"] == "ko"

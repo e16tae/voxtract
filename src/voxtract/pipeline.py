@@ -91,6 +91,7 @@ def run_pipeline(
         settings = settings.model_copy(update={"stt_context": context})
 
     chunk_min = chunk_minutes or settings.chunk_minutes
+    lang = language or settings.language or None
     stt = get_stt(stt_provider or settings.stt_provider, settings=settings)
 
     # Pre-convert to 16kHz mono WAV (benchmark-matching conditions)
@@ -106,10 +107,10 @@ def run_pipeline(
         handles_long = getattr(stt, "handles_long_audio", False)
         if duration > _CHUNK_THRESHOLD_MINUTES * 60 and not handles_long:
             transcript = _transcribe_chunked(
-                wav_path, stt, language, chunk_min, settings.overlap_seconds,
+                wav_path, stt, lang, chunk_min, settings.overlap_seconds,
             )
         else:
-            transcript = stt.transcribe(wav_path, language=language)
+            transcript = stt.transcribe(wav_path, language=lang)
 
         # Step 2: VAD filter — remove STT hallucinations from non-speech regions
         if settings.vad_filter:
