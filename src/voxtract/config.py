@@ -23,11 +23,15 @@ class Settings(BaseSettings):
     stt_max_tokens: int = 512  # max generated tokens per inference batch
 
     # Speaker diarization
-    speaker_model: str = "pyannote/speaker-diarization-community-1"
+    speaker_model: str = "pyannote/speaker-diarization-3.1"
 
     # Audio preprocessing
     audio_normalize: bool = True   # apply EBU R128 loudness normalization before STT
     audio_highpass: bool = True    # apply 80Hz high-pass filter to remove low-frequency rumble
+
+    # VAD (Voice Activity Detection)
+    vad_filter: bool = True        # filter STT hallucinations using VAD
+    vad_model: str = "pyannote/segmentation-3.0"
 
     # Chunking
     chunk_minutes: int = 25
