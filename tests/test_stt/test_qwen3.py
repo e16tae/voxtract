@@ -89,6 +89,36 @@ class TestQwen3Provider:
         assert _resolve_language("unknown") == "unknown"  # passthrough
         assert _resolve_language(None) is None
 
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_repetition_penalty_set(self, mock_device, mock_model_cls) -> None:
+        """Repetition penalty should be set on generation_config after model load."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        provider = Qwen3Provider()
+        provider._load_model()
+
+        assert mock_model.model.generation_config.repetition_penalty == 1.2
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_repetition_penalty_custom(self, mock_device, mock_model_cls) -> None:
+        """Custom repetition_penalty from settings should be applied."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        settings = Settings(stt_repetition_penalty=1.5)
+        provider = Qwen3Provider(settings=settings)
+        provider._load_model()
+
+        assert mock_model.model.generation_config.repetition_penalty == 1.5
+
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
         from voxtract.stt.qwen3 import Qwen3Provider

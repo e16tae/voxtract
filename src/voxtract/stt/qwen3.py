@@ -139,6 +139,11 @@ class Qwen3Provider:
             # Disable KV cache — saves VRAM, no effect on output quality
             if hasattr(self._model, 'model') and hasattr(self._model.model, 'config'):
                 self._model.model.config.use_cache = False
+            # Apply repetition penalty to suppress hallucinated repetitions
+            if hasattr(self._model, 'model') and hasattr(self._model.model, 'generation_config'):
+                self._model.model.generation_config.repetition_penalty = (
+                    self._settings.stt_repetition_penalty
+                )
         except Exception as exc:
             raise STTError(
                 f"Failed to load Qwen3 ASR model '{self._model_repo}': {exc}",
