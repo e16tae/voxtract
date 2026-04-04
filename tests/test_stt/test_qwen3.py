@@ -254,3 +254,43 @@ class TestPipelineChunkingSkip:
 
         mock_chunked.assert_not_called()
         mock_provider.transcribe.assert_called_once()
+
+
+class TestConfigDefaults:
+    """Verify new quality-optimization config defaults."""
+
+    def test_language_default_ko(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_LANGUAGE", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.language == "ko"
+
+    def test_repetition_penalty_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_REPETITION_PENALTY", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_repetition_penalty == 1.2
+
+    def test_max_tokens_default_1024(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_MAX_TOKENS", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_max_tokens == 1024
+
+    def test_language_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_LANGUAGE", "en")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.language == "en"
+
+    def test_repetition_penalty_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_REPETITION_PENALTY", "1.5")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_repetition_penalty == 1.5
+
+    def test_max_tokens_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_MAX_TOKENS", "2048")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_max_tokens == 2048

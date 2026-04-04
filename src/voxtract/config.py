@@ -15,12 +15,16 @@ class Settings(BaseSettings):
     # Device
     device: str = "auto"  # "auto", "cuda", "cuda:0", "cuda:1", "cpu"
 
+    # Language
+    language: str = "ko"  # default language for STT (ISO 639-1)
+
     # STT
     stt_provider: str = "qwen3"
     stt_model: str = "Qwen/Qwen3-ASR-1.7B"
     stt_aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     stt_context: str = ""  # contextual hints for ASR (e.g. topic, names, jargon)
-    stt_max_tokens: int = 512  # max generated tokens per inference batch
+    stt_repetition_penalty: float = 1.2  # suppress repeated token hallucinations
+    stt_max_tokens: int = 1024  # max generated tokens per inference batch
 
     # Speaker diarization
     speaker_model: str = "pyannote/speaker-diarization-3.1"
