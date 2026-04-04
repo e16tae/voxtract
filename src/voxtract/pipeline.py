@@ -7,7 +7,7 @@ import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from voxtract.config import get_settings
+from voxtract.config import get_settings, resolve_device
 from voxtract.errors import SpeakerError
 from voxtract.models import Transcript, Utterance
 
@@ -111,7 +111,26 @@ def run_pipeline(
         else:
             transcript = stt.transcribe(wav_path, language=language)
 
-        # Step 2: Diarize (WAV already in correct format, no re-conversion needed)
+        # Step 2: VAD filter — remove STT hallucinations from non-speech regions
+        if settings.vad_filter:
+            try:
+                from voxtract.audio.vad import get_speech_segments, filter_utterances_by_vad
+                speech_segments = get_speech_segments(
+                    wav_path, device=resolve_device(settings), settings=settings,
+                )
+                filtered = filter_utterances_by_vad(transcript.utterances, speech_segments)
+                transcript = Transcript(
+                    language=transcript.language,
+                    speakers=transcript.speakers,
+                    utterances=filtered,
+                    metadata=transcript.metadata,
+                )
+            except ImportError:
+                logger.warning("VAD not available (speaker extras not installed)")
+            except Exception as exc:
+                logger.warning("VAD filtering failed: %s, continuing without", exc)
+
+        # Step 3: Diarize (WAV already in correct format, no re-conversion needed)
         if len(transcript.speakers) <= 1:
             try:
                 from voxtract.speaker.diarizer import diarize_transcript

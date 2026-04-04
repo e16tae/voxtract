@@ -46,6 +46,86 @@ class TestPipelinePreconvert:
             assert Path(diarize_audio_arg) == wav_path
 
 
+class TestPipelineVadFilter:
+    def test_vad_filters_hallucinations_before_diarize(self, tmp_path: Path) -> None:
+        """VAD should run between STT and diarization, removing non-speech utterances."""
+        stt_transcript = Transcript(
+            language="ko",
+            speakers=["Speaker 0"],
+            utterances=[
+                Utterance(speaker="Speaker 0", start_time=0.0, end_time=5.0, text="real speech"),
+                Utterance(speaker="Speaker 0", start_time=20.0, end_time=25.0, text="hallucination"),
+            ],
+            metadata={},
+        )
+        # After VAD filter, only "real speech" remains
+        diarized = Transcript(
+            language="ko",
+            speakers=["Speaker 1"],
+            utterances=[
+                Utterance(speaker="Speaker 1", start_time=0.0, end_time=5.0, text="real speech"),
+            ],
+            metadata={},
+        )
+
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = stt_transcript
+
+        wav_path = tmp_path / "audio.wav"
+        wav_path.touch()
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.get_duration", return_value=60.0), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
+             patch("voxtract.audio.vad.get_speech_segments", return_value=[(0.0, 10.0)]) as mock_vad, \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=diarized) as mock_diarize:
+
+            from voxtract.pipeline import run_pipeline
+
+            audio = tmp_path / "input.m4a"
+            audio.touch()
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+            # VAD was called
+            mock_vad.assert_called_once()
+            # Diarizer received filtered transcript (1 utterance, not 2)
+            diarize_call_transcript = mock_diarize.call_args[0][0]
+            assert len(diarize_call_transcript.utterances) == 1
+            assert diarize_call_transcript.utterances[0].text == "real speech"
+
+    def test_vad_disabled_skips_filter(self, tmp_path: Path) -> None:
+        """When vad_filter=False, VAD should not run."""
+        from voxtract.config import Settings
+
+        settings_no_vad = Settings(vad_filter=False)
+
+        fake_transcript = Transcript(
+            language="ko", speakers=["Speaker 0"], utterances=[], metadata={},
+        )
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = fake_transcript
+
+        wav_path = tmp_path / "audio.wav"
+        wav_path.touch()
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.get_duration", return_value=60.0), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
+             patch("voxtract.audio.vad.get_speech_segments") as mock_vad, \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript), \
+             patch("voxtract.pipeline.get_settings", return_value=settings_no_vad):
+
+            from voxtract.pipeline import run_pipeline
+
+            audio = tmp_path / "input.m4a"
+            audio.touch()
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+            mock_vad.assert_not_called()
+
+
 class TestMergeChunkDedup:
     """Tests for fuzzy deduplication in chunk overlap merging."""
 

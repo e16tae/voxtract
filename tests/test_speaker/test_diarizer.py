@@ -153,7 +153,7 @@ class TestLoadPipeline:
         """_load_pipeline should use the model name from settings."""
         from voxtract.config import Settings
 
-        settings = Settings(speaker_model="pyannote/speaker-diarization-community-1")
+        settings = Settings(speaker_model="pyannote/speaker-diarization-3.1")
 
         mock_pipeline_cls = MagicMock()
         mock_pipeline_cls.from_pretrained.return_value = MagicMock()
@@ -165,5 +165,5 @@ class TestLoadPipeline:
             _load_pipeline("cpu", settings=settings)
 
         mock_pipeline_cls.from_pretrained.assert_called_once_with(
-            "pyannote/speaker-diarization-community-1"
+            "pyannote/speaker-diarization-3.1"
         )
