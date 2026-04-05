@@ -58,6 +58,7 @@ def transcribe(
     if context is not None:
         settings = settings.model_copy(update={"stt_context": context})
     provider_name = stt_provider or settings.stt_provider
+    lang = language or settings.language or None
 
     try:
         provider = get_provider(provider_name, settings=settings)
@@ -67,7 +68,7 @@ def transcribe(
                 normalize=settings.audio_normalize,
                 highpass=settings.audio_highpass,
             )
-            transcript = provider.transcribe(wav_path, language=language)
+            transcript = provider.transcribe(wav_path, language=lang)
     except VoxtractError as e:
         if as_json:
             _output_error("transcribe", e)
@@ -122,14 +123,18 @@ def process(
     as_json: bool,
 ) -> None:
     """Full pipeline: audio → transcribe → diarize → transcript JSON."""
+    from voxtract.config import get_settings
     from voxtract.pipeline import run_pipeline
+
+    settings = get_settings()
+    lang = language or settings.language or None
 
     try:
         result = run_pipeline(
             audio_path=audio_path,
             output=output,
             output_dir=output_dir,
-            language=language,
+            language=lang,
             stt_provider=stt_provider,
             context=context,
             chunk_minutes=chunk_minutes,

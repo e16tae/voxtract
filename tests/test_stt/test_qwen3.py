@@ -89,6 +89,36 @@ class TestQwen3Provider:
         assert _resolve_language("unknown") == "unknown"  # passthrough
         assert _resolve_language(None) is None
 
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_repetition_penalty_set(self, mock_device, mock_model_cls) -> None:
+        """Repetition penalty should be set on generation_config after model load."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        provider = Qwen3Provider()
+        provider._load_model()
+
+        assert mock_model.model.generation_config.repetition_penalty == 1.2
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_repetition_penalty_custom(self, mock_device, mock_model_cls) -> None:
+        """Custom repetition_penalty from settings should be applied."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        settings = Settings(stt_repetition_penalty=1.5)
+        provider = Qwen3Provider(settings=settings)
+        provider._load_model()
+
+        assert mock_model.model.generation_config.repetition_penalty == 1.5
+
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         from voxtract.errors import STTError
         from voxtract.stt.qwen3 import Qwen3Provider
@@ -254,3 +284,100 @@ class TestPipelineChunkingSkip:
 
         mock_chunked.assert_not_called()
         mock_provider.transcribe.assert_called_once()
+
+
+class TestConfigDefaults:
+    """Verify new quality-optimization config defaults."""
+
+    def test_language_default_ko(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_LANGUAGE", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.language == "ko"
+
+    def test_repetition_penalty_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_REPETITION_PENALTY", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_repetition_penalty == 1.2
+
+    def test_max_tokens_default_1024(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_MAX_TOKENS", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_max_tokens == 1024
+
+    def test_language_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_LANGUAGE", "en")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.language == "en"
+
+    def test_repetition_penalty_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_REPETITION_PENALTY", "1.5")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_repetition_penalty == 1.5
+
+    def test_max_tokens_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_MAX_TOKENS", "2048")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_max_tokens == 2048
+
+
+class TestLanguageFallback:
+    """Verify language fallback: CLI --language > settings.language."""
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    def test_provider_resolves_language_code_to_full_name(
+        self, mock_device, mock_model_cls, tmp_path,
+    ) -> None:
+        """Provider should resolve ISO code (e.g. 'ko') to full name ('Korean') for the model."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = [
+            MagicMock(language="Korean", text="테스트", time_stamps=None),
+        ]
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        wav = tmp_path / "test.wav"
+        wav.touch()
+
+        settings = Settings(language="ko")
+        provider = Qwen3Provider(settings=settings)
+        provider.transcribe(wav, language="ko")
+
+        call_kwargs = mock_model.transcribe.call_args[1]
+        assert call_kwargs["language"] == "Korean"
+
+    def test_pipeline_passes_settings_language(self, tmp_path) -> None:
+        """Pipeline should use settings.language when language param is None."""
+        from voxtract.models import Transcript
+        from voxtract.pipeline import run_pipeline
+
+        fake_transcript = Transcript(
+            language="ko", speakers=["Speaker 0"], utterances=[], metadata={},
+        )
+        mock_provider = MagicMock()
+        mock_provider.handles_long_audio = True
+        mock_provider.transcribe.return_value = fake_transcript
+
+        wav_path = tmp_path / "audio.wav"
+        wav_path.touch()
+
+        with patch("voxtract.stt.get_provider", return_value=mock_provider), \
+             patch("voxtract.audio.splitter.get_duration", return_value=60.0), \
+             patch("voxtract.audio.splitter.convert_to_wav16k", return_value=wav_path), \
+             patch("voxtract.speaker.diarizer.diarize_transcript", return_value=fake_transcript):
+
+            audio = tmp_path / "input.m4a"
+            audio.touch()
+            # language=None → should fallback to settings.language ("ko")
+            run_pipeline(audio_path=audio, output=tmp_path / "out.json")
+
+        call_kwargs = mock_provider.transcribe.call_args[1]
+        assert call_kwargs["language"] == "ko"
