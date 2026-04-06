@@ -70,6 +70,7 @@ def run_pipeline(
     audio_path: Path,
     output: Path | None = None,
     output_dir: Path | None = None,
+    fmt: str = "json",
     language: str | None = None,
     stt_provider: str | None = None,
     context: str | None = None,
@@ -148,17 +149,19 @@ def run_pipeline(
                 logger.warning("Speaker diarization failed: %s, continuing without", exc)
 
     # Write output (outside temp dir context — WAV no longer needed)
+    from voxtract.formatter import write_transcript
+
+    ext = "txt" if fmt == "txt" else "json"
     if output is not None:
         out_path = Path(output)
     elif output_dir is not None:
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{audio_path.stem}_transcript.json"
+        out_path = out_dir / f"{audio_path.stem}_transcript.{ext}"
     else:
-        out_path = Path(f"{audio_path.stem}_transcript.json")
+        out_path = Path(f"{audio_path.stem}_transcript.{ext}")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(transcript.model_dump_json(indent=2), encoding="utf-8")
+    write_transcript(transcript, out_path, fmt)
 
     return {
         "status": "success",

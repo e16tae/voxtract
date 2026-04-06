@@ -34,6 +34,7 @@ def cli() -> None:
 @cli.command()
 @click.argument("audio_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--output", "-o", type=click.Path(path_type=Path), default=None)
+@click.option("--format", "-f", "fmt", type=click.Choice(["json", "txt"]), default="json", help="Output format.")
 @click.option("--language", "-l", default=None, help="Language code (e.g. 'ko'). Auto-detected if omitted.")
 @click.option("--stt-provider", default=None, help="STT provider name.")
 @click.option("--context", "-c", default=None, help="Contextual hints for ASR (topic, names, jargon).")
@@ -41,12 +42,13 @@ def cli() -> None:
 def transcribe(
     audio_path: Path,
     output: Path | None,
+    fmt: str,
     language: str | None,
     stt_provider: str | None,
     context: str | None,
     as_json: bool,
 ) -> None:
-    """Transcribe audio file to a transcript JSON (no diarization)."""
+    """Transcribe audio file to a transcript (no diarization)."""
     import tempfile
 
     from voxtract.audio.splitter import convert_to_wav16k
@@ -79,8 +81,11 @@ def transcribe(
             _output_error("transcribe", err)
         raise click.ClickException(str(e)) from e
 
-    output = output or Path(audio_path.stem + "_transcript.json")
-    output.write_text(transcript.model_dump_json(indent=2), encoding="utf-8")
+    from voxtract.formatter import write_transcript
+
+    ext = "txt" if fmt == "txt" else "json"
+    output = output or Path(f"{audio_path.stem}_transcript.{ext}")
+    write_transcript(transcript, output, fmt)
 
     if as_json:
         _output_json({
@@ -101,6 +106,7 @@ def transcribe(
 @click.argument("audio_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--output", "-o", type=click.Path(path_type=Path), default=None)
 @click.option("--output-dir", type=click.Path(path_type=Path), default=None)
+@click.option("--format", "-f", "fmt", type=click.Choice(["json", "txt"]), default="json", help="Output format.")
 @click.option("--language", "-l", default=None, help="Language code.")
 @click.option("--stt-provider", default=None)
 @click.option("--context", "-c", default=None, help="Contextual hints for ASR (topic, names, jargon).")
@@ -113,6 +119,7 @@ def process(
     audio_path: Path,
     output: Path | None,
     output_dir: Path | None,
+    fmt: str,
     language: str | None,
     stt_provider: str | None,
     context: str | None,
@@ -122,7 +129,7 @@ def process(
     max_speakers: int | None,
     as_json: bool,
 ) -> None:
-    """Full pipeline: audio → transcribe → diarize → transcript JSON."""
+    """Full pipeline: audio → transcribe → diarize → transcript."""
     from voxtract.config import get_settings
     from voxtract.pipeline import run_pipeline
 
@@ -134,6 +141,7 @@ def process(
             audio_path=audio_path,
             output=output,
             output_dir=output_dir,
+            fmt=fmt,
             language=lang,
             stt_provider=stt_provider,
             context=context,
