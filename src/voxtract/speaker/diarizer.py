@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from voxtract.audio.splitter import convert_to_wav16k
-from voxtract.config import Settings, resolve_device
+from voxtract.config import Settings, resolve_device_speaker
 from voxtract.errors import SpeakerError
 from voxtract.models import Transcript, Utterance, WordTimestamp
 
@@ -202,7 +202,7 @@ def diarize_transcript(
         from voxtract.config import get_settings
         settings = get_settings()
 
-    device = resolve_device(settings)
+    device = resolve_device_speaker(settings)
     logger.info("Running pyannote diarization on device=%s", device)
 
     pipeline = _load_pipeline(device, settings=settings)

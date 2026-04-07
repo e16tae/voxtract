@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from voxtract.config import Settings, resolve_device
+from voxtract.config import Settings, resolve_device_stt
 from voxtract.errors import STTError
 from voxtract.models import Transcript, Utterance, WordTimestamp
 from voxtract.stt import register
@@ -53,7 +53,7 @@ _OVERHEAD_GB = 0.5        # CUDA context + fragmentation buffer
 _PEAK_PER_BATCH_GB = 0.68  # lm_head peak allocation per batch item
 
 
-def _resolve_batch_size(device: str) -> int:
+def _resolve_batch_size(device: str, num_beams: int = 1) -> int:
     """Calculate optimal max_inference_batch_size from available VRAM."""
     if not device.startswith("cuda"):
         return 4
@@ -66,7 +66,8 @@ def _resolve_batch_size(device: str) -> int:
         return 2
 
     available_gb = total_gb - _MODEL_MEMORY_GB - _OVERHEAD_GB
-    batch_size = max(1, int(available_gb / _PEAK_PER_BATCH_GB))
+    cost_per_batch = _PEAK_PER_BATCH_GB * max(num_beams, 1)
+    batch_size = max(1, int(available_gb / cost_per_batch))
     return min(batch_size, 16)
 
 
@@ -105,7 +106,7 @@ class Qwen3Provider:
                 recoverable=False,
             )
 
-        device = resolve_device(self._settings)
+        device = resolve_device_stt(self._settings)
         if device.startswith("cuda"):
             dtype = torch.bfloat16
             import os
@@ -113,7 +114,7 @@ class Qwen3Provider:
         else:
             dtype = torch.float32
 
-        batch_size = _resolve_batch_size(device)
+        batch_size = _resolve_batch_size(device, self._settings.stt_num_beams)
         logger.info(
             "Loading Qwen3 ASR on device=%s dtype=%s batch_size=%d",
             device, dtype, batch_size,
@@ -136,14 +137,15 @@ class Qwen3Provider:
                     attn_implementation=attn_impl,
                 ),
             )
-            # Disable KV cache — saves VRAM, no effect on output quality
+            # KV cache: needed for beam search, disable otherwise to save VRAM
             if hasattr(self._model, 'model') and hasattr(self._model.model, 'config'):
-                self._model.model.config.use_cache = False
-            # Apply repetition penalty to suppress hallucinated repetitions
+                self._model.model.config.use_cache = self._settings.stt_num_beams > 1
+            # Tune generation parameters for quality
             if hasattr(self._model, 'model') and hasattr(self._model.model, 'generation_config'):
-                self._model.model.generation_config.repetition_penalty = (
-                    self._settings.stt_repetition_penalty
-                )
+                gen_cfg = self._model.model.generation_config
+                gen_cfg.repetition_penalty = self._settings.stt_repetition_penalty
+                gen_cfg.temperature = self._settings.stt_temperature
+                gen_cfg.num_beams = self._settings.stt_num_beams
         except Exception as exc:
             raise STTError(
                 f"Failed to load Qwen3 ASR model '{self._model_repo}': {exc}",

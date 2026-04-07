@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from voxtract.config import Settings, resolve_device
+from voxtract.config import Settings, resolve_device_speaker
 from voxtract.errors import AudioError
 from voxtract.models import Utterance
 
@@ -44,7 +44,7 @@ def get_speech_segments(
         settings = get_settings()
 
     if device is None:
-        device = resolve_device(settings)
+        device = resolve_device_speaker(settings)
 
     try:
         model = Model.from_pretrained(settings.vad_model)
