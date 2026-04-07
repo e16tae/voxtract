@@ -48,22 +48,39 @@ class TestQwen3Provider:
         assert provider.handles_long_audio is True
 
     @patch("qwen_asr.Qwen3ASRModel")
-    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
-    def test_use_cache_false(self, mock_device, mock_model_cls) -> None:
-        """Model should be loaded with use_cache=False set on model.config."""
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
+    def test_use_cache_enabled_with_beam_search(self, mock_device, mock_model_cls) -> None:
+        """KV cache should be enabled when num_beams > 1 (default=3)."""
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model.model.config.use_cache = False
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        provider = Qwen3Provider()
+        provider._load_model()
+
+        assert mock_model.model.config.use_cache is True
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
+    def test_use_cache_disabled_with_greedy(self, mock_device, mock_model_cls) -> None:
+        """KV cache should be disabled when num_beams=1 (greedy) to save VRAM."""
+        from voxtract.config import Settings
         from voxtract.stt.qwen3 import Qwen3Provider
 
         mock_model = MagicMock()
         mock_model.model.config.use_cache = True
         mock_model_cls.from_pretrained.return_value = mock_model
 
-        provider = Qwen3Provider()
+        settings = Settings(stt_num_beams=1)
+        provider = Qwen3Provider(settings=settings)
         provider._load_model()
 
         assert mock_model.model.config.use_cache is False
 
     @patch("qwen_asr.Qwen3ASRModel")
-    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
     def test_max_tokens_from_settings(self, mock_device, mock_model_cls) -> None:
         """max_new_tokens should be read from settings.stt_max_tokens."""
         from voxtract.config import Settings
@@ -90,7 +107,7 @@ class TestQwen3Provider:
         assert _resolve_language(None) is None
 
     @patch("qwen_asr.Qwen3ASRModel")
-    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
     def test_repetition_penalty_set(self, mock_device, mock_model_cls) -> None:
         """Repetition penalty should be set on generation_config after model load."""
         from voxtract.stt.qwen3 import Qwen3Provider
@@ -102,9 +119,29 @@ class TestQwen3Provider:
         provider._load_model()
 
         assert mock_model.model.generation_config.repetition_penalty == 1.2
+        assert mock_model.model.generation_config.temperature == 0.0
+        assert mock_model.model.generation_config.num_beams == 3
 
     @patch("qwen_asr.Qwen3ASRModel")
-    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
+    def test_generation_config_custom(self, mock_device, mock_model_cls) -> None:
+        """Custom generation params from settings should be applied."""
+        from voxtract.config import Settings
+        from voxtract.stt.qwen3 import Qwen3Provider
+
+        mock_model = MagicMock()
+        mock_model_cls.from_pretrained.return_value = mock_model
+
+        settings = Settings(stt_repetition_penalty=1.5, stt_temperature=0.3, stt_num_beams=5)
+        provider = Qwen3Provider(settings=settings)
+        provider._load_model()
+
+        assert mock_model.model.generation_config.repetition_penalty == 1.5
+        assert mock_model.model.generation_config.temperature == 0.3
+        assert mock_model.model.generation_config.num_beams == 5
+
+    @patch("qwen_asr.Qwen3ASRModel")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
     def test_repetition_penalty_custom(self, mock_device, mock_model_cls) -> None:
         """Custom repetition_penalty from settings should be applied."""
         from voxtract.config import Settings
@@ -325,12 +362,36 @@ class TestConfigDefaults:
         settings = Settings()
         assert settings.stt_max_tokens == 2048
 
+    def test_temperature_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_TEMPERATURE", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_temperature == 0.0
+
+    def test_temperature_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_TEMPERATURE", "0.3")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_temperature == 0.3
+
+    def test_num_beams_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("VOXTRACT_STT_NUM_BEAMS", raising=False)
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_num_beams == 3
+
+    def test_num_beams_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("VOXTRACT_STT_NUM_BEAMS", "5")
+        from voxtract.config import Settings
+        settings = Settings()
+        assert settings.stt_num_beams == 5
+
 
 class TestLanguageFallback:
     """Verify language fallback: CLI --language > settings.language."""
 
     @patch("qwen_asr.Qwen3ASRModel")
-    @patch("voxtract.stt.qwen3.resolve_device", return_value="cpu")
+    @patch("voxtract.stt.qwen3.resolve_device_stt", return_value="cpu")
     def test_provider_resolves_language_code_to_full_name(
         self, mock_device, mock_model_cls, tmp_path,
     ) -> None:
