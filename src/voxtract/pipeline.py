@@ -101,6 +101,7 @@ def run_pipeline(
             audio_path, output_dir=Path(tmp_dir),
             normalize=settings.audio_normalize,
             highpass=settings.audio_highpass,
+            compand=settings.audio_compand,
         )
 
         # Step 1: Transcribe (with auto-split for long audio)

@@ -30,6 +30,6 @@ def _ensure_builtins() -> None:
     if _PROVIDERS:
         return
     try:
-        import voxtract.stt.qwen3  # noqa: F401
+        import voxtract.stt.whisper  # noqa: F401
     except ImportError:
         pass

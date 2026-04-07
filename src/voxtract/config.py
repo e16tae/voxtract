@@ -21,14 +21,12 @@ class Settings(BaseSettings):
     language: str = "ko"  # default language for STT (ISO 639-1)
 
     # STT
-    stt_provider: str = "qwen3"
-    stt_model: str = "Qwen/Qwen3-ASR-1.7B"
-    stt_aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B"
+    stt_provider: str = "whisper"
+    stt_model: str = "large-v3-turbo"  # Whisper model size (large-v3-turbo, large-v3, medium, etc.)
     stt_context: str = ""  # contextual hints for ASR (e.g. topic, names, jargon)
     stt_repetition_penalty: float = 1.2  # suppress repeated token hallucinations
-    stt_max_tokens: int = 1024  # max generated tokens per inference batch
     stt_temperature: float = 0.0  # decoding temperature (0.0 = greedy, most stable for ASR)
-    stt_num_beams: int = 3  # beam search width (1 = greedy, higher = better quality, more VRAM)
+    stt_num_beams: int = 18  # beam search width (higher = better quality; 18 optimal for Korean meeting transcription)
 
     # Speaker diarization
     speaker_model: str = "pyannote/speaker-diarization-3.1"
@@ -36,6 +34,7 @@ class Settings(BaseSettings):
     # Audio preprocessing
     audio_normalize: bool = True   # apply EBU R128 loudness normalization before STT
     audio_highpass: bool = True    # apply 80Hz high-pass filter to remove low-frequency rumble
+    audio_compand: bool = True     # compress dynamic range so quiet speakers aren't missed by STT
 
     # VAD (Voice Activity Detection)
     vad_filter: bool = True        # filter STT hallucinations using VAD

@@ -74,12 +74,15 @@ def convert_to_wav16k(
     output_dir: Path,
     normalize: bool = True,
     highpass: bool = True,
+    compand: bool = True,
 ) -> Path:
     """Convert audio to 16kHz mono PCM WAV.
 
     Returns original path if already matching (and no filters enabled).
     When normalize=True, applies EBU R128 loudness normalization via ffmpeg loudnorm.
     When highpass=True, applies 80Hz high-pass filter to remove low-frequency rumble.
+    When compand=True, compresses dynamic range so quiet speakers are boosted
+    closer to loud ones — prevents STT from skipping faint speech.
     """
     audio_path = Path(audio_path)
     if not audio_path.exists():
@@ -89,7 +92,7 @@ def convert_to_wav16k(
             recoverable=False,
         )
 
-    if not normalize and not highpass and _is_wav16k_mono(audio_path):
+    if not normalize and not highpass and not compand and _is_wav16k_mono(audio_path):
         return audio_path
 
     if not check_ffmpeg():
@@ -103,6 +106,10 @@ def convert_to_wav16k(
     af_filters = []
     if highpass:
         af_filters.append("highpass=f=80")
+    if compand:
+        # Gentle dynamic range compression: boost quiet parts (below -30dB)
+        # while keeping loud parts intact. Attack/decay tuned for speech.
+        af_filters.append("acompressor=threshold=-25dB:ratio=3:attack=5:release=50:makeup=2dB")
     if normalize:
         af_filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
 
@@ -123,7 +130,7 @@ def convert_to_wav16k(
             recoverable=False,
         ) from exc
 
-    filters_label = "+".join(f for f in ["highpass" if highpass else "", "loudnorm" if normalize else ""] if f)
+    filters_label = "+".join(f for f in ["highpass" if highpass else "", "compand" if compand else "", "loudnorm" if normalize else ""] if f)
     label = f"16kHz mono WAV + {filters_label}" if filters_label else "16kHz mono WAV"
     logger.info("Converted %s → %s (%s)", audio_path.name, wav_path.name, label)
     return wav_path

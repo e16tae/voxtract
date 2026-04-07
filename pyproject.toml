@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-stt = ["qwen-asr>=0.0.6", "torch>=2.0"]
+stt = ["faster-whisper>=1.0", "torch>=2.0"]
 speaker = ["pyannote.audio>=3.3"]
 all = ["voxtract[stt,speaker]"]
 dev = [
