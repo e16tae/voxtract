@@ -69,6 +69,7 @@ def transcribe(
                 audio_path, output_dir=Path(tmp_dir),
                 normalize=settings.audio_normalize,
                 highpass=settings.audio_highpass,
+                compand=settings.audio_compand,
             )
             transcript = provider.transcribe(wav_path, language=lang)
     except VoxtractError as e:
